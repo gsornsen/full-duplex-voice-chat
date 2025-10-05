@@ -2,9 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 jobs:
   lint:
@@ -44,6 +43,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      - name: Generate protobuf stubs
+        run: |
+          uv run python -m grpc_tools.protoc \
+            -I src/rpc \
+            --python_out=src/rpc/generated \
+            --grpc_python_out=src/rpc/generated \
+            --pyi_out=src/rpc/generated \
+            src/rpc/tts.proto
+
+      - name: Fix protobuf imports
+        run: |
+          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+
       - name: Run mypy
         run: uv run mypy src/ tests/
 
@@ -63,6 +75,19 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras
+
+      - name: Generate protobuf stubs
+        run: |
+          uv run python -m grpc_tools.protoc \
+            -I src/rpc \
+            --python_out=src/rpc/generated \
+            --grpc_python_out=src/rpc/generated \
+            --pyi_out=src/rpc/generated \
+            src/rpc/tts.proto
+
+      - name: Fix protobuf imports
+        run: |
+          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
 
       - name: Run pytest
         run: uv run pytest tests/ -v

@@ -46,6 +46,7 @@ packages = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+exclude = ["src/rpc/generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S"]
@@ -66,8 +67,19 @@ check_untyped_defs = true
 no_implicit_reexport = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+exclude = ["src/rpc/generated"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-q"
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.anyio]
+backends = ["asyncio"]
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.2.0",
+]
