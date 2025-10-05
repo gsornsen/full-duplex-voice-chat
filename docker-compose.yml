@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Redis for service discovery
+  redis:
+    image: redis:7-alpine
+    container_name: redis-tts
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tts-network
+
+  # Orchestrator service
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    container_name: orchestrator
+    ports:
+      - "8080:8080"  # WebRTC
+      - "8081:8081"  # WebSocket
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # TTS worker (GPU 0)
+  tts0:
+    build:
+      context: .
+      dockerfile: Dockerfile.tts
+    container_name: tts-worker-0
+    ports:
+      - "7002:7002"  # gRPC
+      - "9090:9090"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-worker-0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tts-network
+    volumes:
+      - ./voicepacks:/app/voicepacks:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+
+networks:
+  tts-network:
+    driver: bridge

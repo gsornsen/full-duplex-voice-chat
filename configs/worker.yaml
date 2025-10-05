@@ -1,0 +1,64 @@
+# TTS Worker Configuration
+
+worker:
+  name: "tts-worker-0"
+  grpc_host: "0.0.0.0"
+  grpc_port: 7002
+
+  # Worker capabilities
+  capabilities:
+    streaming: true
+    zero_shot: true
+    lora: false
+    cpu_ok: false
+    languages: ["en"]
+    emotive_zero_prompt: true
+    max_concurrent_sessions: 3
+
+# Model Manager configuration
+model_manager:
+  # Required default model (must exist)
+  default_model_id: "cosyvoice2-en-base"
+
+  # Optional preload list
+  preload_model_ids: []
+
+  # Eviction policy
+  ttl_ms: 600000           # 10 minutes idle → unload
+  min_residency_ms: 120000  # Keep at least 2 minutes
+  evict_check_interval_ms: 30000  # Check every 30 seconds
+
+  # Capacity limits
+  resident_cap: 3           # Max models in VRAM
+  max_parallel_loads: 1     # Prevent OOM from concurrent loads
+
+  # Warmup
+  warmup_enabled: true
+  warmup_text: "This is a warmup test."
+
+# Audio processing
+audio:
+  output_sample_rate: 48000
+  frame_duration_ms: 20
+  loudness_target_lufs: -16.0
+  normalization_enabled: true
+
+# Redis service discovery
+redis:
+  url: "redis://localhost:6379"
+  registration_ttl_seconds: 30
+  heartbeat_interval_seconds: 10
+
+# Metrics
+metrics:
+  enabled: true
+  prometheus_port: 9090
+  track_latency: true
+  track_rtf: true
+  track_queue_depth: true
+
+# Logging
+logging:
+  level: "INFO"
+  format: "json"
+  include_session_id: true

@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package tts;
+
+// TTS Service Definition
+service TTSService {
+  // Session lifecycle
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+
+  // Main streaming synthesis
+  rpc Synthesize(stream TextChunk) returns (stream AudioFrame);
+
+  // Runtime control
+  rpc Control(ControlRequest) returns (ControlResponse);
+
+  // Model lifecycle
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc LoadModel(LoadModelRequest) returns (LoadModelResponse);
+  rpc UnloadModel(UnloadModelRequest) returns (UnloadModelResponse);
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+
+// Session management messages
+message StartSessionRequest {
+  string session_id = 1;
+  string model_id = 2;
+  map<string, string> options = 3;
+}
+
+message StartSessionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message EndSessionRequest {
+  string session_id = 1;
+}
+
+message EndSessionResponse {
+  bool success = 1;
+}
+
+// Streaming synthesis messages
+message TextChunk {
+  string session_id = 1;
+  string text = 2;
+  bool is_final = 3;
+  int64 sequence_number = 4;
+}
+
+message AudioFrame {
+  string session_id = 1;
+  bytes audio_data = 2;
+  int32 sample_rate = 3;
+  int32 frame_duration_ms = 4;
+  int64 sequence_number = 5;
+  bool is_final = 6;
+}
+
+// Control messages
+enum ControlCommand {
+  PAUSE = 0;
+  RESUME = 1;
+  STOP = 2;
+  RELOAD = 3;
+}
+
+message ControlRequest {
+  string session_id = 1;
+  ControlCommand command = 2;
+}
+
+message ControlResponse {
+  bool success = 1;
+  string message = 2;
+  int64 timestamp_ms = 3;
+}
+
+// Model management messages
+message ListModelsRequest {}
+
+message ModelInfo {
+  string model_id = 1;
+  string family = 2;
+  bool is_loaded = 3;
+  repeated string languages = 4;
+  map<string, string> metadata = 5;
+}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message LoadModelRequest {
+  string model_id = 1;
+  bool preload_only = 2;
+}
+
+message LoadModelResponse {
+  bool success = 1;
+  string message = 2;
+  int64 load_duration_ms = 3;
+}
+
+message UnloadModelRequest {
+  string model_id = 1;
+}
+
+message UnloadModelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Capabilities
+message GetCapabilitiesRequest {}
+
+message Capabilities {
+  bool streaming = 1;
+  bool zero_shot = 2;
+  bool lora = 3;
+  bool cpu_ok = 4;
+  repeated string languages = 5;
+  bool emotive_zero_prompt = 6;
+  int32 max_concurrent_sessions = 7;
+}
+
+message GetCapabilitiesResponse {
+  Capabilities capabilities = 1;
+  repeated string resident_models = 2;
+  map<string, double> metrics = 3;
+}

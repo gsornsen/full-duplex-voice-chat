@@ -1,0 +1,55 @@
+# Orchestrator Configuration
+
+transport:
+  # WebRTC configuration
+  webrtc:
+    enabled: true
+    port: 8080
+    ice_servers:
+      - urls: "stun:stun.l.google.com:19302"
+
+  # WebSocket fallback
+  websocket:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8081
+
+# Voice Activity Detection
+vad:
+  enabled: true
+  sample_rate: 48000
+  frame_duration_ms: 20
+  aggressiveness: 3  # 0-3, higher = more aggressive filtering
+
+# Automatic Speech Recognition
+asr:
+  enabled: true
+  model: "small"  # tiny, base, small, medium, large
+  language: "en"
+  device: "cuda"  # cuda or cpu
+
+# Routing configuration
+routing:
+  strategy: "prefer-resident"  # prefer-resident, least-busy, random
+  fallback_on_unavailable: true
+  async_model_load: true
+  health_check_interval_ms: 5000
+
+# Redis service discovery
+redis:
+  url: "redis://localhost:6379"
+  worker_ttl_seconds: 30
+  heartbeat_interval_seconds: 10
+
+# Session management
+session:
+  max_concurrent: 10
+  idle_timeout_seconds: 300
+  barge_in_enabled: true
+  barge_in_debounce_ms: 100
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "json"
+  redact_audio_paths: true
