@@ -9,16 +9,18 @@ import asyncio
 import logging
 import subprocess
 import time
+from collections.abc import AsyncIterator
 
 import pytest
 
 from src.orchestrator.grpc_client import TTSWorkerClient
+from src.rpc.generated import tts_pb2
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
-async def worker_process():
+async def worker_process() -> AsyncIterator[subprocess.Popen[bytes]]:
     """Start TTS worker in subprocess.
 
     Starts the worker server in a subprocess and ensures it's running
@@ -63,7 +65,9 @@ async def worker_process():
 
 
 @pytest.fixture
-async def client(worker_process):
+async def client(
+    worker_process: subprocess.Popen[bytes],
+) -> AsyncIterator[TTSWorkerClient]:
     """Create and connect TTS worker client.
 
     Creates a client instance, connects to the worker, and ensures the
@@ -84,7 +88,7 @@ async def client(worker_process):
 
 
 @pytest.mark.asyncio
-async def test_worker_connection(client: TTSWorkerClient):
+async def test_worker_connection(client: TTSWorkerClient) -> None:
     """Test basic worker connection and capabilities.
 
     Verifies that the client can connect to the worker and retrieve
@@ -103,7 +107,7 @@ async def test_worker_connection(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_list_models(client: TTSWorkerClient):
+async def test_list_models(client: TTSWorkerClient) -> None:
     """Test listing available models.
 
     Verifies that the worker returns a list of available models with
@@ -125,7 +129,7 @@ async def test_list_models(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_session_lifecycle(client: TTSWorkerClient):
+async def test_session_lifecycle(client: TTSWorkerClient) -> None:
     """Test session start and end.
 
     Verifies that sessions can be created and terminated properly,
@@ -147,7 +151,7 @@ async def test_session_lifecycle(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_streaming_synthesis(client: TTSWorkerClient):
+async def test_streaming_synthesis(client: TTSWorkerClient) -> None:
     """Test streaming text to audio.
 
     Verifies that text chunks are synthesized into audio frames with
@@ -192,7 +196,7 @@ async def test_streaming_synthesis(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_pause_command(client: TTSWorkerClient):
+async def test_pause_command(client: TTSWorkerClient) -> None:
     """Test PAUSE control command.
 
     Verifies that the PAUSE command responds within the 50ms SLA and
@@ -206,9 +210,9 @@ async def test_pause_command(client: TTSWorkerClient):
     # Start synthesis in background
     text_chunks = ["Long text for pause test"]
 
-    async def synthesize_task():
+    async def synthesize_task() -> list[tts_pb2.AudioFrame]:
         """Collect frames from synthesis."""
-        frames = []
+        frames: list[tts_pb2.AudioFrame] = []
         async for frame in client.synthesize(text_chunks):
             frames.append(frame)
         return frames
@@ -244,7 +248,7 @@ async def test_pause_command(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_resume_command(client: TTSWorkerClient):
+async def test_resume_command(client: TTSWorkerClient) -> None:
     """Test RESUME control command.
 
     Verifies that RESUME command properly continues synthesis after
@@ -258,9 +262,9 @@ async def test_resume_command(client: TTSWorkerClient):
     # Start synthesis
     text_chunks = ["Text for resume test"]
 
-    async def synthesize_task():
+    async def synthesize_task() -> list[tts_pb2.AudioFrame]:
         """Collect frames from synthesis."""
-        frames = []
+        frames: list[tts_pb2.AudioFrame] = []
         async for frame in client.synthesize(text_chunks):
             frames.append(frame)
         return frames
@@ -287,7 +291,7 @@ async def test_resume_command(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_stop_command(client: TTSWorkerClient):
+async def test_stop_command(client: TTSWorkerClient) -> None:
     """Test STOP control command.
 
     Verifies that STOP command immediately terminates synthesis
@@ -301,9 +305,9 @@ async def test_stop_command(client: TTSWorkerClient):
     # Start synthesis
     text_chunks = ["Text for stop test"]
 
-    async def synthesize_task():
+    async def synthesize_task() -> list[tts_pb2.AudioFrame]:
         """Collect frames until stopped."""
-        frames = []
+        frames: list[tts_pb2.AudioFrame] = []
         async for frame in client.synthesize(text_chunks):
             frames.append(frame)
         return frames
@@ -331,7 +335,7 @@ async def test_stop_command(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_load_unload_model(client: TTSWorkerClient):
+async def test_load_unload_model(client: TTSWorkerClient) -> None:
     """Test model loading and unloading.
 
     Verifies that models can be dynamically loaded and unloaded
@@ -349,7 +353,7 @@ async def test_load_unload_model(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_multiple_sessions_sequential(client: TTSWorkerClient):
+async def test_multiple_sessions_sequential(client: TTSWorkerClient) -> None:
     """Test multiple sequential sessions.
 
     Verifies that the worker can handle multiple sessions in sequence
@@ -376,7 +380,7 @@ async def test_multiple_sessions_sequential(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_invalid_session_error(client: TTSWorkerClient):
+async def test_invalid_session_error(client: TTSWorkerClient) -> None:
     """Test error handling for invalid session.
 
     Verifies that attempting to synthesize without an active session
@@ -392,7 +396,7 @@ async def test_invalid_session_error(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_invalid_command_error(client: TTSWorkerClient):
+async def test_invalid_command_error(client: TTSWorkerClient) -> None:
     """Test error handling for invalid control command.
 
     Verifies that invalid control commands are rejected with
@@ -411,7 +415,7 @@ async def test_invalid_command_error(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_frame_size_validation(client: TTSWorkerClient):
+async def test_frame_size_validation(client: TTSWorkerClient) -> None:
     """Test that audio frames have exact expected size.
 
     Verifies that all non-final frames contain exactly 1920 bytes
@@ -442,7 +446,7 @@ async def test_frame_size_validation(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_pause_response_timing(client: TTSWorkerClient):
+async def test_pause_response_timing(client: TTSWorkerClient) -> None:
     """Test PAUSE command response timing under load.
 
     Verifies that PAUSE commands consistently respond within 50ms
@@ -455,9 +459,9 @@ async def test_pause_response_timing(client: TTSWorkerClient):
     # Start synthesis with longer text
     text_chunks = ["Longer text to ensure synthesis is active"]
 
-    async def synthesize_task():
+    async def synthesize_task() -> list[tts_pb2.AudioFrame]:
         """Collect frames from synthesis."""
-        frames = []
+        frames: list[tts_pb2.AudioFrame] = []
         async for frame in client.synthesize(text_chunks):
             frames.append(frame)
         return frames
@@ -498,7 +502,7 @@ async def test_pause_response_timing(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_session_isolation(client: TTSWorkerClient):
+async def test_session_isolation(client: TTSWorkerClient) -> None:
     """Test that sessions are isolated from each other.
 
     Verifies that operations on one session don't affect other sessions
@@ -514,14 +518,14 @@ async def test_session_isolation(client: TTSWorkerClient):
         await client2.start_session("session-2")
 
         # Start synthesis on both
-        async def synth1():
-            frames = []
+        async def synth1() -> list[tts_pb2.AudioFrame]:
+            frames: list[tts_pb2.AudioFrame] = []
             async for frame in client.synthesize(["Client 1"]):
                 frames.append(frame)
             return frames
 
-        async def synth2():
-            frames = []
+        async def synth2() -> list[tts_pb2.AudioFrame]:
+            frames: list[tts_pb2.AudioFrame] = []
             async for frame in client2.synthesize(["Client 2"]):
                 frames.append(frame)
             return frames
@@ -555,7 +559,7 @@ async def test_session_isolation(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_empty_text_chunks(client: TTSWorkerClient):
+async def test_empty_text_chunks(client: TTSWorkerClient) -> None:
     """Test handling of empty text chunks.
 
     Verifies that the worker handles empty text gracefully
@@ -585,7 +589,7 @@ async def test_empty_text_chunks(client: TTSWorkerClient):
 
 
 @pytest.mark.asyncio
-async def test_capabilities_consistency(client: TTSWorkerClient):
+async def test_capabilities_consistency(client: TTSWorkerClient) -> None:
     """Test that capabilities remain consistent across calls.
 
     Verifies that multiple calls to GetCapabilities return

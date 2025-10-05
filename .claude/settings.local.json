@@ -6,7 +6,10 @@
       "Bash(uv run mypy:*)",
       "Bash(uv run pytest:*)",
       "Bash(uv run:*)",
-      "Bash(just:*)"
+      "Bash(just:*)",
+      "mcp__github__get_pull_request",
+      "Bash(just gen-proto:*)",
+      "Bash(just typecheck)"
     ],
     "deny": [],
     "ask": []
