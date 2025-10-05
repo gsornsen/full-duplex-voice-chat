@@ -9,7 +9,8 @@
       "Bash(just:*)",
       "mcp__github__get_pull_request",
       "Bash(just gen-proto:*)",
-      "Bash(just typecheck)"
+      "Bash(just typecheck)",
+      "Read(//tmp/**)"
     ],
     "deny": [],
     "ask": []

@@ -12,21 +12,21 @@
 
 ### ✅ Tasks
 
-* [ ] Initialize repo with base `src/`, `tests/`, `configs/`, `docs/` directories.
-* [ ] Create `pyproject.toml` using **uv**, with dependencies only (no Python pin).
-* [ ] Add `ruff`, `mypy`, `pytest`, and `watchfiles` setup.
-* [ ] Add `justfile` with commands: `lint`, `typecheck`, `test`, `ci`, `run-*`.
-* [ ] Add `.github/workflows/ci.yml` for lint + type + test.
-* [ ] Create base `Dockerfile.orchestrator` and `Dockerfile.tts`.
-* [ ] `docker-compose.yml` for Redis + Orchestrator + TTS skeleton.
-* [ ] Add placeholder configs (`orchestrator.yaml`, `worker.yaml`).
-* [ ] Confirm `just ci` passes on empty stubs.
+* [x] Initialize repo with base `src/`, `tests/`, `configs/`, `docs/` directories.
+* [x] Create `pyproject.toml` using **uv**, with dependencies only (no Python pin).
+* [x] Add `ruff`, `mypy`, `pytest`, and `watchfiles` setup.
+* [x] Add `justfile` with commands: `lint`, `typecheck`, `test`, `ci`, `run-*`.
+* [x] Add `.github/workflows/ci.yml` for lint + type + test.
+* [x] Create base `Dockerfile.orchestrator` and `Dockerfile.tts`.
+* [x] `docker-compose.yml` for Redis + Orchestrator + TTS skeleton.
+* [x] Add placeholder configs (`orchestrator.yaml`, `worker.yaml`).
+* [x] Confirm `just ci` passes on empty stubs.
 
 ### 🧪 Validation
 
-* [ ] `uv lock` works and generates valid environment.
-* [ ] CI passes in GitHub Actions.
-* [ ] `just lint`, `just typecheck`, and `just test` succeed.
+* [x] `uv lock` works and generates valid environment.
+* [x] CI passes in GitHub Actions.
+* [x] `just lint`, `just typecheck`, and `just test` succeed.
 
 ---
 
@@ -36,19 +36,19 @@
 
 ### ✅ Tasks
 
-* [ ] Create `src/rpc/tts.proto`:
+* [x] Create `src/rpc/tts.proto`:
 
-  * [ ] `Synthesize(stream TextChunk) → stream AudioFrame`
-  * [ ] `Control`, `ListModels`, `LoadModel`, `UnloadModel`
-* [ ] Run codegen (`just gen-proto`).
-* [ ] Implement mock TTS worker with synthetic sine-wave output.
-* [ ] Implement orchestrator stub to connect to worker and log frames.
+  * [x] `Synthesize(stream TextChunk) → stream AudioFrame`
+  * [x] `Control`, `ListModels`, `LoadModel`, `UnloadModel`
+* [x] Run codegen (`just gen-proto`).
+* [x] Implement mock TTS worker with synthetic sine-wave output.
+* [x] Implement orchestrator stub to connect to worker and log frames.
 
 ### 🧪 Validation
 
-* [ ] Integration test: orchestrator→worker→audio bytes verified.
-* [ ] Unit test: proto roundtrip, `Control` commands.
-* [ ] Mock worker responds to `PAUSE`, `RESUME`, `STOP`.
+* [x] Integration test: orchestrator→worker→audio bytes verified.
+* [x] Unit test: proto roundtrip, `Control` commands.
+* [x] Mock worker responds to `PAUSE`, `RESUME`, `STOP`.
 
 ---
 

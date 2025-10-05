@@ -62,17 +62,21 @@ run-tts-sesame DEFAULT="cosyvoice2-en-base":
 # Run TTS worker with CosyVoice adapter
 run-tts-cosy DEFAULT="cosyvoice2-en-base":
     CUDA_VISIBLE_DEVICES=0 uv run python -m src.tts.worker \
-        --config configs/worker.yaml \
         --adapter cosyvoice2 \
         --default-model {{DEFAULT}}
 
+# Run mock TTS worker (for M1/M2 testing)
+run-tts-mock:
+    uv run python -m src.tts.worker \
+        --adapter mock \
+        --default-model mock-440hz
+
 # Run orchestrator
 run-orch:
-    uv run python -m src.orchestrator.server \
-        --config configs/orchestrator.yaml
+    uv run python -m src.orchestrator.server
 
 # Run CLI client
-cli HOST="ws://localhost:8081":
+cli HOST="ws://localhost:8080":
     uv run python -m src.client.cli_client --host {{HOST}}
 
 # Profiling
