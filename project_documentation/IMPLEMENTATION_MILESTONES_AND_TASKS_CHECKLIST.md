@@ -58,7 +58,7 @@
 
 ### ✅ Tasks
 
-* [ ] Integrate **LiveKit Agent SDK** (preferred) or aiortc baseline.
+* [ ] Integrate **LiveKit Agent SDK** in a way that can be swapped out with minimal effort for a different/custom orchestrator in the future if necessary.
 * [ ] Add CLI WS client and minimal web client for local speech demo.
 * [ ] Implement `VAD` stub and message routing loop.
 * [ ] Add Redis service registration/discovery skeleton.
