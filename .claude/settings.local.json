@@ -12,7 +12,9 @@
       "Bash(just typecheck)",
       "Read(//tmp/**)",
       "Bash(uv sync:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(ruff check:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
