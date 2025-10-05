@@ -78,7 +78,7 @@ just run-orch
 
 4. Run CLI client:
 ```bash
-just cli HOST="ws://localhost:8081"
+just cli HOST="ws://localhost:8080"
 ```
 
 ### Running with Docker

@@ -5,9 +5,9 @@ transport:
   websocket:
     enabled: true
     host: "0.0.0.0"
-    port: 8080
-    max_connections: 100
-    frame_queue_size: 50
+    port: 8080  # Valid range: 1024-65535
+    max_connections: 100  # Valid range: >= 1
+    frame_queue_size: 50  # Valid range: >= 10
 
   livekit:
     enabled: true  # Optional - system works without it
@@ -18,25 +18,25 @@ transport:
 
 redis:
   url: "redis://localhost:6379"
-  db: 0
+  db: 0  # Valid range: 0-15
   worker_key_prefix: "worker:"
-  worker_ttl_seconds: 30
-  connection_pool_size: 10
+  worker_ttl_seconds: 30  # Valid range: >= 5
+  connection_pool_size: 10  # Valid range: >= 1
 
 routing:
   # M2: Static routing to single mock worker
   static_worker_addr: "grpc://localhost:7001"
 
-  # M9+: Dynamic routing settings (not used in M2)
+  # M9+ (Future): Dynamic routing settings (not used in M2)
   prefer_resident_models: true
   load_balance_strategy: "queue_depth"
 
 vad:
   enabled: true
-  aggressiveness: 2  # 0=least, 3=most aggressive
-  sample_rate: 16000  # webrtcvad requirement
-  frame_duration_ms: 20
+  aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
+  sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
+  frame_duration_ms: 20  # Valid values: 10, 20, 30
 
 # Operational settings
-log_level: "INFO"
-graceful_shutdown_timeout_s: 10
+log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+graceful_shutdown_timeout_s: 10  # Valid range: >= 1

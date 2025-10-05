@@ -91,3 +91,15 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Claude subagent files
+project_documentation/.agent_assignments/*
+project_documentation/.*.md
+project_documentation/.work_assignments/*
+project_documentation/.discovery_reports/*
+project_documentation/.coordination_status.md
+project_documentation/UNIFIED_WORK_PLAN.md
+project_documentation/DOCUMENTATION_COORDINATION_PLAN.md
+.coordination_status.md
+INCIDENT_RESPONDER_DELIVERABLES.md
+INCIDENT_RESPONDER_SUMMARY.md

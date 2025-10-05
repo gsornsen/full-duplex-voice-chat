@@ -12,6 +12,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
     networks:
       - tts-network
 
@@ -22,13 +23,21 @@ services:
       dockerfile: Dockerfile.orchestrator
     container_name: orchestrator
     ports:
-      - "8080:8080"  # WebRTC
-      - "8081:8081"  # WebSocket
+      - "8080:8080"  # WebSocket
+      - "8081:8081"  # Health check HTTP
     environment:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
         condition: service_healthy
+      tts0:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - tts-network
     deploy:
@@ -46,7 +55,7 @@ services:
       dockerfile: Dockerfile.tts
     container_name: tts-worker-0
     ports:
-      - "7002:7002"  # gRPC
+      - "7001:7001"  # gRPC (changed from 7002 to match config)
       - "9090:9090"  # Metrics
     environment:
       - REDIS_URL=redis://redis:6379
@@ -55,6 +64,14 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      # For M2: Use simple port check
+      # For M4+: Use grpc-health-probe
+      test: ["CMD-SHELL", "nc -zv localhost 7001 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - tts-network
     volumes:

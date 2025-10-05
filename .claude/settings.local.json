@@ -14,7 +14,8 @@
       "Bash(uv sync:*)",
       "Bash(python3:*)",
       "Bash(ruff check:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []

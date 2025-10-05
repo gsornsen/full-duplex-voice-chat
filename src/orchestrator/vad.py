@@ -64,9 +64,13 @@ class VADProcessor:
         vad.on_speech_start = lambda ts: print(f"Speech started at {ts}ms")
         vad.on_speech_end = lambda ts: print(f"Speech ended at {ts}ms")
 
-        # Process frames
+        # Process frames (sync iteration if frames are pre-loaded)
         for frame in audio_frames:
             vad.process_frame(frame)
+
+        # Or for async frame generation:
+        # async for frame in audio_frame_generator():
+        #     vad.process_frame(frame)
         ```
     """
 
