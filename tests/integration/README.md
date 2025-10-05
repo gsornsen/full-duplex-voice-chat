@@ -1,134 +1,172 @@
 # Integration Tests
 
-This directory contains integration tests for the TTS worker and client system.
+Comprehensive integration tests for the Realtime Duplex Voice system.
 
-## Test Coverage
+## Overview
 
-### M1 Worker Integration Tests (`test_m1_worker_integration.py`)
+The integration test suite validates end-to-end functionality across all system components:
 
-Comprehensive integration tests covering:
+- **WebSocket Transport**: Full text → audio flow via WebSocket
+- **VAD Processing**: Voice Activity Detection with synthetic audio
+- **Redis Discovery**: Worker registration and service discovery
+- **Full Pipeline**: Complete system integration with all components
+- **LiveKit Transport**: WebRTC-based transport (placeholder for future)
+- **Performance Benchmarks**: Latency, throughput, and stability metrics
 
-1. **Connection & Discovery**
-   - `test_worker_connection`: Basic connection and capabilities retrieval
-   - `test_list_models`: Model listing and metadata validation
-   - `test_capabilities_consistency`: Capabilities consistency across calls
+## Prerequisites
 
-2. **Session Management**
-   - `test_session_lifecycle`: Session start/end lifecycle
-   - `test_multiple_sessions_sequential`: Multiple sequential sessions
-   - `test_session_isolation`: Concurrent session isolation
+### Required
 
-3. **Streaming Synthesis**
-   - `test_streaming_synthesis`: Text-to-audio streaming flow
-   - `test_frame_size_validation`: Exact frame size verification (1920 bytes)
-   - `test_empty_text_chunks`: Empty text handling
+- **Docker**: For running Redis and LiveKit containers
+- **Python 3.13+**: For running tests
+- **uv**: Python package manager
 
-4. **Control Commands**
-   - `test_pause_command`: PAUSE command and timing
-   - `test_resume_command`: RESUME command after pause
-   - `test_stop_command`: STOP command and termination
-   - `test_pause_response_timing`: PAUSE response time under load (< 50ms SLA)
+### Optional
 
-5. **Model Lifecycle**
-   - `test_load_unload_model`: Dynamic model loading/unloading
-
-6. **Error Handling**
-   - `test_invalid_session_error`: Session validation
-   - `test_invalid_command_error`: Command validation
+- **LiveKit server**: For WebRTC transport tests (currently skipped in M2)
 
 ## Running Tests
 
-### Run All Integration Tests
+### All Integration Tests
 
 ```bash
-uv run pytest tests/integration/
+# Run all integration tests
+pytest tests/integration/ -v
+
+# Run with detailed output
+pytest tests/integration/ -vv --tb=long
 ```
 
-### Run Worker Integration Tests Only
+### By Category
 
 ```bash
-uv run pytest tests/integration/test_m1_worker_integration.py
+# WebSocket tests only
+pytest tests/integration/test_websocket_e2e.py -v
+
+# VAD tests only
+pytest tests/integration/test_vad_integration.py -v
+
+# Redis discovery tests
+pytest tests/integration/test_redis_discovery.py -v
+
+# Full pipeline tests
+pytest tests/integration/test_full_pipeline.py -v
+
+# Performance benchmarks
+pytest tests/integration/test_performance.py -v
+
+# LiveKit tests (currently skipped)
+pytest tests/integration/test_livekit_e2e.py -v
 ```
 
-### Run Specific Test
+### By Marker
 
 ```bash
-uv run pytest tests/integration/test_m1_worker_integration.py::test_pause_command -v
+# All integration tests
+pytest -m integration
+
+# Docker-dependent tests
+pytest -m docker
+
+# Redis-dependent tests
+pytest -m redis
+
+# Performance benchmarks
+pytest -m performance
+
+# Skip slow tests
+pytest -m "not slow"
 ```
 
-### Run with Debug Logging
+### Skip Docker Tests
 
 ```bash
-uv run pytest tests/integration/test_m1_worker_integration.py -v -s --log-cli-level=DEBUG
+# Run tests that don't require Docker
+pytest tests/integration/ -v -m "not docker"
 ```
 
-## Test Architecture
+## Test Files
 
-### Fixtures
+### `conftest.py`
 
-**`worker_process` (module-scoped)**
+Central fixture file providing:
 
-- Starts TTS worker in subprocess
-- Waits 2 seconds for worker to initialize
-- Validates worker is running
-- Terminates worker on teardown (5s timeout, then kill)
+- **Docker Container Management**: Redis and LiveKit containers
+- **Mock TTS Worker**: Spawns and manages test TTS worker
+- **Orchestrator Server**: Starts orchestrator for testing
+- **WebSocket Clients**: Pre-configured WS client connections
+- **Audio Generation**: Synthetic audio for VAD testing
+- **Validation Utilities**: Frame timing and latency measurement
+- **Metric Collectors**: Performance metric aggregation
 
-**`client` (function-scoped)**
+### `test_websocket_e2e.py`
 
-- Creates `TTSWorkerClient` instance
-- Connects to worker at `localhost:7001`
-- Disconnects and cleans up after test
+End-to-end WebSocket flow tests covering full text → audio pipeline.
 
-### Test Strategy
+### `test_vad_integration.py`
 
-1. **Process Isolation**: Worker runs in subprocess for realistic testing
-2. **Connection Management**: Each test gets fresh client connection
-3. **Session Cleanup**: Sessions are properly ended to avoid resource leaks
-4. **Timing Validation**: Control commands measured for < 50ms SLA
-5. **Frame Validation**: Audio frames checked for exact size (1920 bytes)
+Voice Activity Detection integration tests with synthetic audio.
 
-## Performance SLAs
+### `test_redis_discovery.py`
 
-The tests verify these performance requirements:
+Redis service discovery tests for worker registration.
 
-- **Pause Response Time**: < 50ms (critical for barge-in)
-- **Frame Duration**: Exactly 20ms
-- **Sample Rate**: 48kHz
-- **Frame Size**: 1920 bytes (960 samples × 2 bytes/sample)
+### `test_full_pipeline.py`
 
-## Dependencies
+Full system pipeline integration tests with all components.
 
-- `pytest >= 8.0.0`
-- `pytest-asyncio >= 1.2.0`
-- Worker must be runnable via `uv run python -m src.tts.worker_main`
+### `test_performance.py`
+
+Performance benchmark tests measuring latency and throughput.
+
+### `test_livekit_e2e.py`
+
+LiveKit transport tests (M2 placeholders, mostly skipped).
+
+## Performance Targets
+
+### First Audio Latency (FAL)
+
+- **Single session**: < 300ms (p95)
+- **3 concurrent**: < 400ms (p95)
+- **10 concurrent**: < 600ms (p95)
+
+### Frame Timing
+
+- **Cadence**: 20ms ± 5ms
+- **p95 jitter**: < 5ms
+- **Mean interval**: 18-22ms
+
+### VAD Processing
+
+- **Per-frame latency**: < 5ms (mean)
+- **p95 latency**: < 10ms
+- **p99 latency**: < 20ms
 
 ## Troubleshooting
 
-### Worker Fails to Start
+### Docker Not Available
 
-- Check that port 7001 is available
-- Verify `uv` is installed and configured
-- Check worker logs in subprocess stderr
+Tests will skip automatically if Docker is not installed.
 
-### Tests Timeout
+### Redis Connection Issues
 
-- Increase worker startup wait time in `worker_process` fixture
-- Check system resources (CPU, memory)
-- Verify no firewall blocking localhost:7001
+Check Docker logs: `docker logs test-redis-integration`
 
-### Frame Count Mismatches
+### Port Conflicts
 
-- Mock adapter generates 25 frames per 500ms chunk
-- Tests allow ±10 frames variation for timing jitter
-- Check `INTER_FRAME_DELAY_MS` in `adapter_mock.py`
+Find and kill processes using ports 6379, 7880, or 8080.
 
-## Future Tests
+### Test Timeouts
 
-Planned integration tests:
+Increase timeout in pytest.ini or use `@pytest.mark.timeout(600)`.
 
-- Multi-GPU worker coordination
-- Model manager TTL eviction
-- LRU cache behavior
-- Concurrent session stress testing
-- Network error handling and retries
-- Redis service discovery integration
+## Contributing
+
+When adding new integration tests:
+
+1. Follow existing structure and naming conventions
+2. Add appropriate markers for categorization
+3. Include fixtures in `conftest.py` if reusable
+4. Document new utilities
+5. Ensure tests pass in CI before merging
