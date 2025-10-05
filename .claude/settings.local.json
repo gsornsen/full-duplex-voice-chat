@@ -10,7 +10,9 @@
       "mcp__github__get_pull_request",
       "Bash(just gen-proto:*)",
       "Bash(just typecheck)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(uv sync:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

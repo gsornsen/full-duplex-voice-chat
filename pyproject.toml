@@ -14,6 +14,8 @@ dependencies = [
     "protobuf>=4.25.0",
     "redis>=5.0.0",
     "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "sounddevice>=0.4.6",
     "soundfile>=0.12.0",
     "webrtcvad>=2.0.0",
     "torch>=2.7.0",
@@ -25,6 +27,7 @@ dependencies = [
     "openai-whisper>=20240930",
     "watchfiles>=0.21.0",
     "pyyaml>=6.0.0",
+    "livekit-api>=0.6.0",
 ]
 
 [project.optional-dependencies]
