@@ -28,6 +28,9 @@ from tests.integration.conftest import (
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_full_pipeline_websocket_only(
     redis_container: Any, mock_tts_worker: Any, orchestrator_server: Any
@@ -80,6 +83,9 @@ async def test_full_pipeline_websocket_only(
         logger.info(f"Frame timing: {timing_metrics}")
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_concurrent_websocket_sessions(
     redis_container: Any, registered_mock_worker: Any, orchestrator_server: Any
@@ -138,6 +144,9 @@ async def test_concurrent_websocket_sessions(
     )
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_sequential_messages_same_session(
     redis_container: Any, mock_tts_worker: Any, orchestrator_server: Any
@@ -188,6 +197,9 @@ async def test_sequential_messages_same_session(
         assert fal_summary["p95"] < 500, "p95 FAL exceeds target"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_worker_registration_integration(
     redis_container: Any, registered_mock_worker: Any, orchestrator_server: Any
@@ -242,6 +254,9 @@ async def test_worker_registration_integration(
         await registry.disconnect()
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_system_stability_under_load(
     redis_container: Any, registered_mock_worker: Any, orchestrator_server: Any
@@ -323,6 +338,9 @@ async def test_system_stability_under_load(
     assert total_frames > 0, "No frames received under load"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_error_recovery_and_resilience(
     redis_container: Any, mock_tts_worker: Any, orchestrator_server: Any
@@ -380,6 +398,9 @@ async def test_error_recovery_and_resilience(
     assert success_count >= 3, f"Only {success_count}/5 sessions succeeded"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_session_cleanup_on_disconnect(
     redis_container: Any, mock_tts_worker: Any, orchestrator_server: Any
@@ -419,6 +440,9 @@ async def test_session_cleanup_on_disconnect(
     logger.info("System responsive after cleanup")
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
 @pytest.mark.asyncio
 async def test_component_integration_health_checks(
     redis_container: Any, registered_mock_worker: Any

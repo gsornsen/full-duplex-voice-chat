@@ -1,0 +1,58 @@
+# LiveKit Server Configuration for Local Development
+# This configuration is for self-hosted LiveKit server used by the web client
+
+# Server bind address
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+# RTC (WebRTC) configuration
+rtc:
+  # Port range for UDP (TURN/ICE)
+  port_range_start: 50000
+  port_range_end: 60000
+  # Use TCP fallback if UDP fails
+  use_external_ip: false
+  tcp_port: 7881
+
+# API keys for authentication
+# These should match the .env.local in the web client
+# IMPORTANT: Secrets must be at least 32 characters for security
+keys:
+  devkey: devsecret1234567890abcdefghijklmn
+
+# Room configuration
+room:
+  # Automatically create rooms when clients connect
+  auto_create: true
+  # Empty rooms are deleted after this timeout
+  empty_timeout: 300  # 5 minutes
+  # Maximum number of participants per room
+  max_participants: 10
+
+# Logging configuration
+logging:
+  level: info
+  # Available levels: debug, info, warn, error
+
+# Webhooks (optional - disabled for local dev)
+# webhook:
+#   urls:
+#     - http://orchestrator:8080/webhook
+
+# TURN server configuration (for NAT traversal)
+turn:
+  enabled: true
+  # Domain for TURN server (required when enabled)
+  domain: localhost
+  # Use the RTC port range for TURN
+  # TURN will use the UDP port range defined in rtc section
+  external_tls: false
+  # UDP port for TURN (must be within or separate from RTC range)
+  udp_port: 7882
+
+# Region (optional, for multi-region deployments)
+# region: local
+
+# Node selector (optional, for Kubernetes deployments)
+# node_selector: {}

@@ -4,6 +4,7 @@ Tests configuration loading, validation, and defaults.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -118,31 +119,31 @@ def test_orchestrator_config_defaults() -> None:
     assert config.log_level == "INFO"
     assert config.graceful_shutdown_timeout_s == 10
 
-
+@patch("os.getenv", return_value=None)
 def test_orchestrator_config_from_yaml(tmp_path: Path) -> None:
     """Test loading configuration from YAML file."""
     # Create temporary config file
     config_file = tmp_path / "test_config.yaml"
     config_file.write_text(
         """
-transport:
-  websocket:
-    enabled: true
-    port: 9000
-  livekit:
-    enabled: false
+        transport:
+        websocket:
+            enabled: true
+            port: 9000
+        livekit:
+            enabled: false
 
-redis:
-  url: "redis://testhost:6379"
+        redis:
+        url: "redis://testhost:6379"
 
-routing:
-  static_worker_addr: "grpc://worker:7001"
+        routing:
+        static_worker_addr: "grpc://worker:7001"
 
-vad:
-  aggressiveness: 3
+        vad:
+        aggressiveness: 3
 
-log_level: "DEBUG"
-"""
+        log_level: "DEBUG"
+        """
     )
 
     # Load config
@@ -152,6 +153,45 @@ log_level: "DEBUG"
     assert config.transport.websocket.port == 9000
     assert config.transport.livekit.enabled is False
     assert config.redis.url == "redis://testhost:6379"
+    assert config.routing.static_worker_addr == "grpc://worker:7001"
+    assert config.vad.aggressiveness == 3
+    assert config.log_level == "DEBUG"
+
+
+@patch("os.getenv", return_value="redis://patched_host:6379")
+def test_orchestrator_config_from_yaml_with_environment_variable_overrides(tmp_path: Path) -> None:
+    """Test loading configuration from YAML file."""
+    # Create temporary config file
+    config_file = tmp_path / "test_config.yaml"
+    config_file.write_text(
+        """
+        transport:
+        websocket:
+            enabled: true
+            port: 9000
+        livekit:
+            enabled: false
+
+        redis:
+        url: "redis://testhost:6379"
+
+        routing:
+        static_worker_addr: "grpc://worker:7001"
+
+        vad:
+        aggressiveness: 3
+
+        log_level: "DEBUG"
+        """
+    )
+
+    # Load config
+    config = OrchestratorConfig.from_yaml(config_file)
+
+    # Verify loaded values with environment variable overrides
+    assert config.transport.websocket.port == 9000
+    assert config.transport.livekit.enabled is False
+    assert config.redis.url == "redis://patched_host:6379"
     assert config.routing.static_worker_addr == "grpc://worker:7001"
     assert config.vad.aggressiveness == 3
     assert config.log_level == "DEBUG"

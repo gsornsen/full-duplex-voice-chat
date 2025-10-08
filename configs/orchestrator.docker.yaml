@@ -1,0 +1,43 @@
+# Orchestrator Configuration (Docker)
+# M2: WebSocket + LiveKit transport, VAD stub, static routing
+# This config uses Docker service names for inter-container communication
+
+transport:
+  websocket:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8080  # Valid range: 1024-65535
+    max_connections: 100  # Valid range: >= 1
+    frame_queue_size: 50  # Valid range: >= 10
+
+  livekit:
+    enabled: true  # Optional - system works without it
+    url: "http://livekit:7880"
+    api_key: "devkey"
+    api_secret: "devsecret1234567890abcdefghijklmn"
+    room_prefix: "voice_assistant_room"
+
+redis:
+  url: "redis://redis:6379"
+  db: 0  # Valid range: 0-15
+  worker_key_prefix: "worker:"
+  worker_ttl_seconds: 30  # Valid range: >= 5
+  connection_pool_size: 10  # Valid range: >= 1
+
+routing:
+  # M2: Static routing to single mock worker (use Docker service name)
+  static_worker_addr: "grpc://tts0:7001"
+
+  # M9+ (Future): Dynamic routing settings (not used in M2)
+  prefer_resident_models: true
+  load_balance_strategy: "queue_depth"
+
+vad:
+  enabled: true
+  aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
+  sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
+  frame_duration_ms: 20  # Valid values: 10, 20, 30
+
+# Operational settings
+log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+graceful_shutdown_timeout_s: 10  # Valid range: >= 1

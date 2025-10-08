@@ -5,6 +5,47 @@ Measures performance metrics:
 2. Frame jitter measurement
 3. CPU/memory profiling
 4. Latency percentiles (p50, p95, p99)
+
+IMPORTANT: pytest-forked Process Isolation
+==========================================
+
+These tests MUST be run with the --forked flag to isolate each test in a separate process:
+
+    uv run pytest tests/performance/test_performance.py --forked -v
+
+Why forked execution is required:
+---------------------------------
+The concurrent WebSocket tests (particularly test_fal_concurrent_3_sessions and
+test_fal_concurrent_10_sessions) trigger a garbage collection segfault in Python 3.13.6
+during concurrent websocket.connect() operations. This appears to be a known issue with
+Python 3.13.x's garbage collector when combined with the websockets library.
+
+The crash occurs during GC while creating concurrent WebSocket connections:
+    Fatal Python error: Segmentation fault
+    File "/lib/python3.13/urllib/parse.py", line 401 in urlparse
+    File "websockets/uri.py", line 75 in parse_uri
+    File "websockets/asyncio/client.py", line 378 in create_connection
+
+Process isolation via pytest-forked prevents crashes in one test from affecting other tests,
+allowing the full test suite to complete and report results correctly.
+
+Fixture Compatibility:
+---------------------
+The module-scoped fixtures (orchestrator_server, redis_container, mock_tts_worker) are
+shared across all tests in this file. With --forked, each test runs in a separate subprocess
+that inherits these fixtures from the parent process. This works because:
+
+1. The fixtures are set up once at module import time
+2. Each forked test subprocess connects to the same Redis and orchestrator instances
+3. WebSocket connections are ephemeral and created/destroyed within each test
+4. The parent process handles fixture teardown after all tests complete
+
+Notes:
+------
+- Without --forked, the test suite will crash with segfault during concurrent tests
+- Running individual tests without --forked may work but is not guaranteed
+- Performance metrics remain accurate even with process isolation
+- Test execution time increases due to process forking overhead
 """
 
 import asyncio
@@ -26,6 +67,10 @@ from tests.integration.conftest import (
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_fal_single_session(orchestrator_server: Any) -> None:
     """Benchmark First Audio Latency with single session.
@@ -70,11 +115,18 @@ async def test_fal_single_session(orchestrator_server: Any) -> None:
     assert summary["p95"] < 300, f"p95 FAL {summary['p95']:.2f}ms exceeds 300ms target"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_fal_concurrent_3_sessions(orchestrator_server: Any) -> None:
     """Benchmark First Audio Latency with 3 concurrent sessions.
 
     Target: FAL < 400ms (p95) under moderate load
+
+    WARNING: This test triggers GC segfaults in Python 3.13.6 without process isolation.
+    MUST run with: pytest --forked
     """
     fal_metrics = LatencyMetrics()
     num_messages_per_session = 10
@@ -116,11 +168,18 @@ async def test_fal_concurrent_3_sessions(orchestrator_server: Any) -> None:
     assert summary["p95"] < 400, f"p95 FAL {summary['p95']:.2f}ms exceeds 400ms target"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_fal_concurrent_10_sessions(orchestrator_server: Any) -> None:
     """Benchmark First Audio Latency with 10 concurrent sessions.
 
     Target: FAL < 600ms (p95) under high load
+
+    WARNING: This test triggers GC segfaults in Python 3.13.6 without process isolation.
+    MUST run with: pytest --forked
     """
     fal_metrics = LatencyMetrics()
     num_messages_per_session = 5
@@ -162,6 +221,10 @@ async def test_fal_concurrent_10_sessions(orchestrator_server: Any) -> None:
     assert summary["p95"] < 600, f"p95 FAL {summary['p95']:.2f}ms exceeds 600ms target"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_frame_jitter_measurement(orchestrator_server: Any) -> None:
     """Measure frame jitter (timing variance).
@@ -217,6 +280,10 @@ async def test_frame_jitter_measurement(orchestrator_server: Any) -> None:
     assert p95_jitter < 5.0, f"p95 jitter {p95_jitter:.2f}ms exceeds 5ms target"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_throughput_benchmark(orchestrator_server: Any) -> None:
     """Measure system throughput (messages/frames per second).
@@ -283,6 +350,10 @@ async def test_throughput_benchmark(orchestrator_server: Any) -> None:
     assert frames_per_sec > 0, "No frames delivered"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_latency_percentiles_distribution(orchestrator_server: Any) -> None:
     """Analyze latency distribution across percentiles.
@@ -334,6 +405,10 @@ async def test_latency_percentiles_distribution(orchestrator_server: Any) -> Non
     )
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_cold_start_vs_warm_latency(orchestrator_server: Any) -> None:
     """Compare cold start vs warm latency.
@@ -382,6 +457,10 @@ async def test_cold_start_vs_warm_latency(orchestrator_server: Any) -> None:
     )
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_frame_delivery_consistency(orchestrator_server: Any) -> None:
     """Test consistency of frame delivery.
@@ -431,6 +510,10 @@ async def test_frame_delivery_consistency(orchestrator_server: Any) -> None:
     assert std_count < mean_count * 0.2, f"High variance in frame counts: std={std_count:.2f}"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_stress_test_rapid_messages(orchestrator_server: Any) -> None:
     """Stress test with rapid message sending.
@@ -482,6 +565,10 @@ async def test_stress_test_rapid_messages(orchestrator_server: Any) -> None:
     assert summary["p95"] < 1000, f"p95 latency {summary['p95']:.2f}ms excessive under stress"
 
 
+@pytest.mark.integration
+@pytest.mark.docker
+@pytest.mark.redis
+@pytest.mark.performance
 @pytest.mark.asyncio
 async def test_memory_stability_long_session(orchestrator_server: Any) -> None:
     """Test memory stability during long-running session.

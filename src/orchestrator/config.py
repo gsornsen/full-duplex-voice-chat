@@ -156,7 +156,7 @@ class OrchestratorConfig(BaseModel):
 
     @classmethod
     def from_yaml(cls, path: Path) -> "OrchestratorConfig":
-        """Load configuration from YAML file.
+        """Load configuration from YAML file with environment variable overrides.
 
         Args:
             path: Path to YAML configuration file
@@ -168,6 +168,8 @@ class OrchestratorConfig(BaseModel):
             FileNotFoundError: If configuration file doesn't exist
             ValueError: If YAML is invalid or validation fails
         """
+        import os
+
         import yaml
 
         if not path.exists():
@@ -175,6 +177,36 @@ class OrchestratorConfig(BaseModel):
 
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
+
+        # Apply environment variable overrides
+        if redis_url := os.getenv("REDIS_URL"):
+            # Override Redis URL from environment if set
+            if "redis" not in data:
+                data["redis"] = {}
+            data["redis"]["url"] = redis_url
+
+        # Apply LiveKit environment variable overrides
+        if livekit_url := os.getenv("LIVEKIT_URL"):
+            if "transport" not in data:
+                data["transport"] = {}
+            if "livekit" not in data["transport"]:
+                data["transport"]["livekit"] = {}
+            data["transport"]["livekit"]["url"] = livekit_url
+            data["transport"]["livekit"]["enabled"] = True
+
+        if livekit_api_key := os.getenv("LIVEKIT_API_KEY"):
+            if "transport" not in data:
+                data["transport"] = {}
+            if "livekit" not in data["transport"]:
+                data["transport"]["livekit"] = {}
+            data["transport"]["livekit"]["api_key"] = livekit_api_key
+
+        if livekit_api_secret := os.getenv("LIVEKIT_API_SECRET"):
+            if "transport" not in data:
+                data["transport"] = {}
+            if "livekit" not in data["transport"]:
+                data["transport"]["livekit"] = {}
+            data["transport"]["livekit"]["api_secret"] = livekit_api_secret
 
         return cls.model_validate(data)
 

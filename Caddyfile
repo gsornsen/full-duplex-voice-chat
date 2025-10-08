@@ -1,0 +1,87 @@
+# Caddyfile - Reverse proxy configuration for local network HTTPS access
+#
+# This configuration provides HTTPS for the web client and LiveKit server,
+# allowing camera/microphone permissions to work when accessing from other
+# machines on the local network.
+#
+# IMPORTANT: Update the IP addresses below to match your host machine's IP
+# Find your IP: hostname -I | awk '{print $1}'
+# Or on Windows: ipconfig (look for IPv4 Address)
+#
+# Currently configured for: 172.24.35.45
+
+{
+    # Global options
+    # Disable automatic HTTPS redirect for explicit control
+    auto_https off
+    # Enable local CA for self-signed certificates
+    local_certs
+    # Use simpler TLS configuration
+    servers {
+        protocols h1 h2
+    }
+}
+
+# HTTPS proxy for web client (Next.js on host:3000)
+# Access from: https://voicechat.local:8443 (add to Windows hosts file)
+https://voicechat.local:8443 {
+    # Use mkcert-generated trusted certificate
+    tls /etc/caddy/voicechat.local+3.pem /etc/caddy/voicechat.local+3-key.pem
+
+    # Proxy to Next.js web client running on host
+    # Use host.docker.internal to reach host machine from Docker
+    reverse_proxy host.docker.internal:3000 {
+        # Forward original host header
+        header_up Host {upstream_hostport}
+        # Forward real client IP
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Enable detailed logging for debugging
+    log {
+        output file /var/log/caddy/web.log
+        level INFO
+    }
+}
+
+# WSS proxy for LiveKit WebRTC/WebSocket
+# Access from: wss://voicechat.local:8444
+https://voicechat.local:8444 {
+    # Use mkcert-generated trusted certificate
+    tls /etc/caddy/voicechat.local+3.pem /etc/caddy/voicechat.local+3-key.pem
+
+    # Proxy to LiveKit server in Docker
+    # LiveKit is on the same Docker network, accessible via service name
+    reverse_proxy livekit:7880 {
+        # WebSocket upgrade headers
+        header_up Upgrade {http.request.header.Upgrade}
+        header_up Connection {http.request.header.Connection}
+
+        # Forward original host and client info
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # WebSocket transport settings
+        transport http {
+            # Keep connections alive
+            keepalive 90s
+            keepalive_idle_conns 10
+        }
+    }
+
+    # Enable detailed logging for debugging
+    log {
+        output file /var/log/caddy/livekit.log
+        level INFO
+    }
+}
+
+# Optional: HTTP to HTTPS redirect on port 80
+# Uncomment if you want automatic redirection
+http://voicechat.local {
+    redir https://{host}{uri} permanent
+}

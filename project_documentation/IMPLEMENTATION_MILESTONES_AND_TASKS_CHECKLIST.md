@@ -58,10 +58,11 @@
 
 ### ✅ Tasks
 
-* [ ] Integrate **LiveKit Agent SDK** in a way that can be swapped out with minimal effort for a different/custom orchestrator in the future if necessary.
-* [ ] Add CLI WS client and minimal web client for local speech demo.
-* [ ] Implement `VAD` stub and message routing loop.
-* [ ] Add Redis service registration/discovery skeleton.
+* [x] Integrate **LiveKit Agent SDK** in a way that can be swapped out with minimal effort for a different/custom orchestrator in the future if necessary.
+* [x] Add CLI WS  client for local speech demo.
+* [ ] Integrate https://github.com/livekit-examples/agent-starter-react front-end that uses self-hosted livekit infrastructure for local speech web demo
+* [x] Implement `VAD` stub and message routing loop.
+* [x] Add Redis service registration/discovery skeleton.
 
 ### 🧪 Validation
 

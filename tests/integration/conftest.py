@@ -10,17 +10,18 @@ Provides shared fixtures for:
 """
 
 import asyncio
+import gc
 import json
 import logging
 import subprocess
 import time
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 import grpc
 import numpy as np
 import pytest
+import pytest_asyncio
 import websockets
 from redis import asyncio as aioredis
 from websockets.asyncio.client import ClientConnection
@@ -38,6 +39,49 @@ from src.rpc.generated import tts_pb2, tts_pb2_grpc
 from src.tts.worker import start_worker
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# gRPC Event Loop Workaround
+# ============================================================================
+
+
+@pytest.fixture(scope="module", autouse=True)
+def grpc_event_loop_workaround() -> None:
+    """Workaround for grpc-python event loop cleanup issues.
+
+    grpc-python creates background threads that interact with the asyncio event loop.
+    When pytest-asyncio tears down and recreates event loops between tests, these
+    threads can crash with segfaults when trying to access the old loop.
+
+    This fixture:
+    1. Disables GC during tests to prevent premature cleanup
+    2. Adds a delay after each test to allow grpc threads to finish
+
+    See: https://github.com/grpc/grpc/issues/37714
+    """
+    # Disable garbage collection to prevent premature cleanup of grpc internals
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+
+    yield
+
+    # Re-enable GC if it was enabled before
+    if gc_was_enabled:
+        gc.enable()
+
+    # Give grpc threads time to clean up
+    time.sleep(1.0)
+
+
+@pytest.fixture(scope="module")
+def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
+    """Use a consistent event loop policy for all tests.
+
+    This ensures all fixtures and tests in a module share the same event loop,
+    avoiding grpc-python issues with event loop transitions.
+    """
+    return asyncio.get_event_loop_policy()
 
 
 # ============================================================================
@@ -64,20 +108,23 @@ def docker_available() -> bool:
         return False
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="module")
 async def redis_container(docker_available: bool) -> AsyncIterator[str]:
     """Start Redis container for integration tests.
 
     Yields:
-        Redis URL (redis://localhost:6379)
+        Redis URL (redis://localhost:6380)
 
     Skips test if Docker is not available.
+
+    Note: Uses port 6380 to avoid conflicts with development Redis on 6379.
     """
     if not docker_available:
         pytest.skip("Docker not available")
 
     container_name = "test-redis-integration"
-    redis_url = "redis://localhost:6379"
+    redis_port = 6380  # Use different port to avoid conflicts
+    redis_url = f"redis://localhost:{redis_port}"
 
     # Clean up any existing container
     subprocess.run(  # noqa: S603, S607
@@ -87,7 +134,7 @@ async def redis_container(docker_available: bool) -> AsyncIterator[str]:
     )
 
     # Start Redis container
-    logger.info(f"Starting Redis container: {container_name}")
+    logger.info(f"Starting Redis container: {container_name} on port {redis_port}")
     subprocess.run(  # noqa: S603, S607
         [
             "docker",
@@ -96,7 +143,7 @@ async def redis_container(docker_available: bool) -> AsyncIterator[str]:
             "--name",
             container_name,
             "-p",
-            "6379:6379",
+            f"{redis_port}:6379",
             "redis:7-alpine",
         ],
         check=True,
@@ -113,7 +160,7 @@ async def redis_container(docker_available: bool) -> AsyncIterator[str]:
         except Exception:
             if attempt == 29:
                 raise RuntimeError("Redis failed to start") from None
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
     try:
         yield redis_url
@@ -128,7 +175,7 @@ async def redis_container(docker_available: bool) -> AsyncIterator[str]:
         )
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="module")
 async def livekit_container(docker_available: bool) -> AsyncIterator[str]:
     """Start LiveKit container for integration tests.
 
@@ -204,7 +251,7 @@ async def livekit_container(docker_available: bool) -> AsyncIterator[str]:
 # ============================================================================
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def mock_tts_worker() -> AsyncIterator[str]:
     """Start mock TTS worker process.
 
@@ -230,7 +277,7 @@ async def mock_tts_worker() -> AsyncIterator[str]:
             if attempt == 29:
                 worker_task.cancel()
                 raise RuntimeError("Mock TTS worker failed to start") from None
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
     try:
         yield addr
@@ -243,8 +290,11 @@ async def mock_tts_worker() -> AsyncIterator[str]:
         except asyncio.CancelledError:
             pass
 
+        # Give grpc time to clean up background threads
+        await asyncio.sleep(1.0)
 
-@pytest.fixture
+
+@pytest_asyncio.fixture(scope="module")
 async def registered_mock_worker(
     redis_container: str, mock_tts_worker: str
 ) -> AsyncIterator[WorkerRegistration]:
@@ -295,15 +345,16 @@ async def registered_mock_worker(
 # ============================================================================
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="module")
 async def orchestrator_server(
-    mock_tts_worker: str, tmp_path: Path
+    redis_container: str, mock_tts_worker: str, tmp_path_factory: pytest.TempPathFactory
 ) -> AsyncIterator[OrchestratorConfig]:
     """Start orchestrator server with WebSocket transport.
 
     Args:
+        redis_container: Redis URL fixture
         mock_tts_worker: Mock worker address fixture
-        tmp_path: Pytest temporary directory
+        tmp_path_factory: Pytest temporary directory factory for module scope
 
     Yields:
         Orchestrator configuration
@@ -320,11 +371,19 @@ async def orchestrator_server(
             livekit=LiveKitConfig(enabled=False),
         ),
         routing=RoutingConfig(static_worker_addr=f"grpc://{mock_tts_worker}"),
+        redis={"url": redis_container},  # Use test Redis URL
         log_level="INFO",
     )
 
+    # Write config to temporary file
+    tmp_path = tmp_path_factory.mktemp("config")
+    config_path = tmp_path / "orchestrator_config.yaml"
+    import yaml
+    with open(config_path, 'w') as f:
+        yaml.dump(config.model_dump(mode='json'), f)
+
     # Start server in background
-    server_task = asyncio.create_task(start_server(None))
+    server_task = asyncio.create_task(start_server(config_path))
 
     # Wait for server to be ready
     for attempt in range(30):
@@ -341,7 +400,7 @@ async def orchestrator_server(
             if attempt == 29:
                 server_task.cancel()
                 raise RuntimeError("Orchestrator server failed to start") from None
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
     try:
         yield config
@@ -360,7 +419,7 @@ async def orchestrator_server(
 # ============================================================================
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ws_client() -> AsyncIterator[ClientConnection]:
     """Connect WebSocket client to orchestrator.
 

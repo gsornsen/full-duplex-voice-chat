@@ -1,14 +1,14 @@
-version: '3.8'
-
 services:
   # Redis for service discovery
   redis:
     image: redis:7-alpine
     container_name: redis-tts
-    ports:
-      - "6379:6379"
+    # No external port mapping - only accessible within Docker network
+    # This prevents port conflicts with host Redis/Valkey instances
+    # Services use internal DNS: redis:6379
+    # To access from host for debugging: docker compose exec redis redis-cli
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-h", "localhost", "-p", "6379", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -16,19 +16,78 @@ services:
     networks:
       - tts-network
 
+  # LiveKit server for WebRTC transport
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"   # WebRTC/WebSocket
+      - "7881:7881"   # RTC TCP port
+      - "7882:7882/udp" # TURN/UDP
+      - "50000-50099:50000-50099/udp"  # RTC port range (subset for Docker)
+    volumes:
+      - ./configs/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tts-network
+
+  # Caddy reverse proxy for HTTPS
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
+    ports:
+      - "8443:8443"    # HTTPS for web client
+      - "8444:8444"    # HTTPS for LiveKit WebSocket
+      - "80:80"        # HTTP (optional, for redirects)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro
+      - ./voicechat.local+3-key.pem:/etc/caddy/voicechat.local+3-key.pem:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    depends_on:
+      livekit:
+        condition: service_healthy
+    extra_hosts:
+      # Allow Caddy to reach host machine (for Next.js on host:3000)
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - tts-network
+    restart: unless-stopped
+
   # Orchestrator service
   orchestrator:
     build:
       context: .
       dockerfile: Dockerfile.orchestrator
     container_name: orchestrator
+    command: ["uv", "run", "python", "-m", "src.orchestrator.server", "--config", "configs/orchestrator.docker.yaml"]
     ports:
       - "8080:8080"  # WebSocket
       - "8081:8081"  # Health check HTTP
     environment:
+      # Use internal Docker DNS and correct Redis port (6379 inside container)
       - REDIS_URL=redis://redis:6379
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret1234567890abcdefghijklmn
     depends_on:
       redis:
+        condition: service_healthy
+      livekit:
         condition: service_healthy
       tts0:
         condition: service_healthy
@@ -45,7 +104,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              # count: 1
               capabilities: [gpu]
 
   # TTS worker (GPU 0)
@@ -58,6 +117,7 @@ services:
       - "7001:7001"  # gRPC (changed from 7002 to match config)
       - "9090:9090"  # Metrics
     environment:
+      # Use internal Docker DNS and correct Redis port (6379 inside container)
       - REDIS_URL=redis://redis:6379
       - CUDA_VISIBLE_DEVICES=0
       - WORKER_NAME=tts-worker-0
@@ -65,13 +125,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # For M2: Use simple port check
-      # For M4+: Use grpc-health-probe
-      test: ["CMD-SHELL", "nc -zv localhost 7001 || exit 1"]
+      # Use bash built-in TCP test instead of nc
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 60s
     networks:
       - tts-network
     volumes:
@@ -81,9 +140,18 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              # device_ids: ['0']
               capabilities: [gpu]
 
 networks:
   tts-network:
     driver: bridge
+
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  caddy-logs:
+    driver: local
+  

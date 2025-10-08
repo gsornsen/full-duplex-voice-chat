@@ -30,18 +30,30 @@ Before starting, ensure you have:
 - [ ] **NVIDIA Container Runtime** - Check: `docker run --rm --gpus all nvidia/cuda:12.8.0-base nvidia-smi`
 
 ### Port Availability
-- [ ] **6379** - Redis
-- [ ] **7001** - TTS Worker
+
+**Docker Compose (Recommended):**
+
+Only the following ports need to be available on your host:
+- [ ] **7001** - TTS Worker gRPC (external access optional)
 - [ ] **8080** - Orchestrator WebSocket
+- [ ] **9090** - Metrics (external access optional)
+
+**Note:** Redis runs on Docker's internal network and does **not** require port 6379 to be available on your host. This prevents conflicts with existing Redis/Valkey instances.
 
 Check ports:
 ```bash
-sudo lsof -i :6379,7001,8080
+sudo lsof -i :7001,8080
 # No output = ports available ✓
 ```
 
+**Local Development (Without Docker):**
+
+If running services directly on your host, you'll also need:
+- [ ] **6379** - Redis (or use existing instance)
+
 **Need Help?**
 - [Docker Setup Guide](setup/DOCKER_SETUP.md) - Complete Docker installation
+- [Redis Configuration Guide](REDIS_CONFIGURATION.md) - Redis setup and troubleshooting
 - [Pre-flight Check Script](../scripts/preflight_check.sh) - Automated validation (coming soon)
 
 ---
@@ -66,16 +78,19 @@ docker compose up --build
 
 **What's Happening:**
 - Building Docker images (~2-5 minutes first time)
-- Starting Redis, orchestrator, and TTS worker
+- Starting Redis (internal network only - no host port conflicts)
+- Starting LiveKit server
+- Starting orchestrator and TTS worker
 - Containers starting in dependency order
 
 **Expected Output:**
 ```
 [+] Building 45.2s (24/24) FINISHED
-[+] Running 3/3
- ✔ Container redis         Started                                    0.5s
- ✔ Container orchestrator  Started                                    1.2s
- ✔ Container tts-worker    Started                                    1.8s
+[+] Running 4/4
+ ✔ Container redis-tts      Started                                    0.5s
+ ✔ Container livekit-server Started                                    0.8s
+ ✔ Container tts-worker-0   Started                                    1.8s
+ ✔ Container orchestrator   Started                                    2.2s
 ```
 
 ### Step 3: Verify Services Running
@@ -91,10 +106,13 @@ docker ps
 CONTAINER ID   IMAGE                    STATUS         PORTS
 abc123...      full-duplex-orch         Up 1 minute    0.0.0.0:8080->8080/tcp
 def456...      full-duplex-tts-worker   Up 1 minute    0.0.0.0:7001->7001/tcp
-ghi789...      redis:7-alpine           Up 1 minute    0.0.0.0:6379->6379/tcp
+ghi789...      livekit/livekit-server   Up 1 minute    0.0.0.0:7880->7880/tcp
+jkl012...      redis:7-alpine           Up 1 minute    (internal network only)
 ```
 
-**All 3 containers running?** ✓ Proceed to Step 4
+**Note:** Redis container shows no external port mapping - this is correct! Services communicate via Docker's internal network.
+
+**All 4 containers running?** ✓ Proceed to Step 4
 
 **Containers missing or exited?** See [Troubleshooting](#troubleshooting)
 
@@ -185,6 +203,19 @@ just gen-proto
 
 ### Step 2: Start Redis
 
+**Option A: Use existing Redis/Valkey instance**
+
+If you already have Redis running on port 6379:
+```bash
+# Test connectivity
+redis-cli ping
+# Expected: PONG
+
+# No further action needed - services will use redis://localhost:6379
+```
+
+**Option B: Start Redis in Docker**
+
 ```bash
 # Terminal 1: Start Redis container
 just redis
@@ -195,6 +226,8 @@ just redis
 docker exec -it redis redis-cli ping
 # Expected: PONG
 ```
+
+**Note:** For detailed Redis setup and troubleshooting, see [Redis Configuration Guide](REDIS_CONFIGURATION.md).
 
 ### Step 3: Start TTS Worker
 
@@ -263,7 +296,7 @@ You: /quit
 docker ps
 ```
 
-**Success:** 3 containers running (redis, orchestrator, tts-worker)
+**Success:** 4 containers running (redis-tts, livekit-server, orchestrator, tts-worker-0)
 
 **Failure:** See [Docker Troubleshooting](setup/DOCKER_SETUP.md#common-errors-and-resolutions)
 
@@ -297,10 +330,11 @@ docker logs orchestrator
 
 ### Checkpoint 3: Worker Connected (Step 3)
 
-**Check:**
+**Check Redis worker registration:**
+
+**For Docker:**
 ```bash
-# Verify worker registered in Redis
-docker exec -it redis redis-cli
+docker compose exec redis redis-cli
 
 > KEYS worker:*
 # Expected: 1) "worker:tts-worker-0"
@@ -312,13 +346,23 @@ docker exec -it redis redis-cli
 # Expected: (integer) 25 (or similar, should refresh)
 ```
 
+**For local development:**
+```bash
+redis-cli
+
+> KEYS worker:*
+# Expected: 1) "worker:tts-worker-0"
+```
+
 **Success:** Worker key exists and has TTL
 
 **Failure:** Check worker logs:
 ```bash
-docker logs tts-worker
+docker logs tts-worker-0
 # Or for local: check terminal 2 output
 ```
+
+**Note:** If Redis connection fails, see [Redis Configuration Guide](REDIS_CONFIGURATION.md) for troubleshooting.
 
 ---
 
@@ -387,6 +431,46 @@ Connection failed: [Errno 111] Connection refused
 
 ---
 
+### Redis Connection Issues
+
+**Symptom:**
+```
+redis.exceptions.ConnectionError: Error connecting to redis:6379
+```
+
+**Docker Environment:**
+
+Redis runs on Docker's internal network. Services should use:
+- `REDIS_URL=redis://redis:6379` (NOT `redis:6380`)
+
+**Check configuration:**
+```bash
+# Verify environment variables
+docker compose config | grep REDIS_URL
+# Should show: REDIS_URL=redis://redis:6379
+
+# Test Redis connectivity from orchestrator
+docker compose exec orchestrator redis-cli -h redis -p 6379 ping
+# Expected: PONG
+```
+
+**Local Development:**
+
+If running services locally, ensure Redis is accessible:
+```bash
+# Test connection
+redis-cli -h localhost -p 6379 ping
+# Expected: PONG
+
+# Check if Redis is running
+sudo systemctl status redis-server
+# Or: docker ps | grep redis
+```
+
+**See:** [Redis Configuration Guide](REDIS_CONFIGURATION.md) for detailed troubleshooting
+
+---
+
 ### No Audio Frames Received
 
 **Symptom:**
@@ -403,10 +487,10 @@ Connection failed: [Errno 111] Connection refused
    docker ps | grep tts-worker
 
    # Check worker logs
-   docker logs tts-worker
+   docker logs tts-worker-0
 
    # Verify registration
-   docker exec -it redis redis-cli
+   docker compose exec redis redis-cli
    > KEYS worker:*
    ```
 
@@ -415,8 +499,8 @@ Connection failed: [Errno 111] Connection refused
    # Check Redis
    docker ps | grep redis
 
-   # Test connection
-   docker exec -it redis redis-cli ping
+   # Test connection (from inside Docker network)
+   docker compose exec orchestrator redis-cli -h redis -p 6379 ping
    # Expected: PONG
 
    # Restart if needed
@@ -429,9 +513,12 @@ Connection failed: [Errno 111] Connection refused
    docker logs orchestrator | grep -i grpc
 
    # Verify worker address in config
+   grep "static_worker_addr" configs/orchestrator.docker.yaml
+   # Should be: grpc://tts0:7001 (Docker Compose)
+
+   # Or for local dev:
    grep "static_worker_addr" configs/orchestrator.yaml
-   # Should be: grpc://tts-worker:7002 (Docker Compose)
-   # Or: grpc://localhost:7001 (local dev)
+   # Should be: grpc://localhost:7001
    ```
 
 **Quick Fix:**
@@ -453,7 +540,7 @@ tts-worker exited with code 1
 **Diagnosis:**
 ```bash
 # Check logs
-docker logs tts-worker
+docker logs tts-worker-0
 
 # Common issues:
 # - Port already in use
@@ -569,10 +656,10 @@ python -m src.client.cli_client --host ws://localhost:8080 --verbose
 docker logs orchestrator -f
 
 # Worker logs
-docker logs tts-worker -f
+docker logs tts-worker-0 -f
 
 # Redis logs
-docker logs redis -f
+docker logs redis-tts -f
 ```
 
 ---
@@ -584,6 +671,7 @@ docker logs redis -f
 - [CLI Client Usage Guide](CLI_CLIENT_GUIDE.md) - Advanced CLI usage
 - [Configuration Reference](CONFIGURATION_REFERENCE.md) - Customize settings
 - [Docker Setup Guide](setup/DOCKER_SETUP.md) - Docker troubleshooting
+- [Redis Configuration Guide](REDIS_CONFIGURATION.md) - Redis setup and troubleshooting
 
 **Architecture:**
 - [Architecture Diagrams](architecture/ARCHITECTURE.md) - System design
@@ -730,8 +818,8 @@ docker compose logs
 
 # Specific service
 docker compose logs orchestrator
-docker compose logs tts-worker
-docker compose logs redis
+docker compose logs tts-worker-0
+docker compose logs redis-tts
 
 # Follow logs (tail -f)
 docker compose logs -f
@@ -749,11 +837,16 @@ curl http://localhost:8080/health
 # Worker health (gRPC health check)
 # Requires grpcurl: https://github.com/fullstorydev/grpcurl
 grpcurl -plaintext localhost:7001 grpc.health.v1.Health/Check
+
+# Redis health (from inside Docker network)
+docker compose exec redis redis-cli ping
+# Expected: PONG
 ```
 
 ### Common Issues Links
 
 - [Docker Setup Troubleshooting](setup/DOCKER_SETUP.md#common-errors-and-resolutions)
+- [Redis Configuration Guide](REDIS_CONFIGURATION.md) - Port conflicts, connectivity
 - [WebSocket Protocol Errors](WEBSOCKET_PROTOCOL.md#troubleshooting)
 - [CLI Client Issues](CLI_CLIENT_GUIDE.md#troubleshooting)
 - [Configuration Problems](CONFIGURATION_REFERENCE.md#validation)
@@ -767,6 +860,12 @@ grpcurl -plaintext localhost:7001 grpc.health.v1.Health/Check
 ---
 
 ## Changelog
+
+**v0.2.1 (M2) - 2025-10-06:**
+- Updated Redis configuration to use internal Docker networking
+- Removed external port mapping to prevent conflicts
+- Added Redis Configuration Guide
+- Updated troubleshooting for Redis connectivity
 
 **v0.2.0 (M2) - 2025-10-05:**
 - Initial Quick Start guide

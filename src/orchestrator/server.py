@@ -8,11 +8,13 @@ Main server implementation that:
 5. Streams audio back to clients
 """
 
+import argparse
 import asyncio
 import logging
 from pathlib import Path
 
-from aiohttp import web
+# from aiohttp import web
+from aiohttp.web import Application, AppRunner, TCPSite
 
 from src.orchestrator.config import OrchestratorConfig
 from src.orchestrator.grpc_client import TTSWorkerClient
@@ -29,132 +31,130 @@ async def handle_session(
 ) -> None:
     """Handle a single client session.
 
+    Processes text input from the session, forwards it to the TTS worker,
+    and streams audio back to the client. Handles session lifecycle and
+    error cases.
+
     Args:
-        session_manager: Session manager instance
-        worker_client: gRPC client connected to TTS worker
+        session_manager: Manager for this session
+        worker_client: TTS worker gRPC client
+
+    Notes:
+        This coroutine runs for the duration of the session, from client
+        connection through to disconnect or error. It maintains the session
+        state machine (LISTENING → SPEAKING) and coordinates with the worker.
     """
     session_id = session_manager.session_id
 
     try:
-        logger.info("Session handler started", extra={"session_id": session_id})
+        logger.info("Starting session handler", extra={"session_id": session_id})
 
-        # Start TTS worker session
-        success = await worker_client.start_session(session_id, model_id="mock-440hz")
-        if not success:
-            logger.error("Failed to start TTS session", extra={"session_id": session_id})
-            return
+        # Start TTS session with worker
+        model_id = "mock-440hz"  # M2: hardcoded model
+        await worker_client.start_session(session_id, model_id)
+        logger.info(
+            "TTS session started",
+            extra={"session_id": session_id, "model_id": model_id},
+        )
 
-        # Start audio sender loop in background
-        audio_task = asyncio.create_task(session_manager.audio_sender_loop())
+        # Main session loop: consume text input, stream audio output
+        while True:
+            # Wait for text input
+            logger.debug("Waiting for text input", extra={"session_id": session_id})
+            text = await session_manager.transport.receive_text().__anext__()
 
-        # Transition to listening state
-        session_manager.transition_state(SessionState.LISTENING)
+            if text is None:
+                logger.info("Client disconnected (no text)", extra={"session_id": session_id})
+                break
 
-        # Process text from client
-        async for text in session_manager.transport.receive_text():
+            if not text.strip():
+                logger.debug(
+                    "Received empty text, skipping",
+                    extra={"session_id": session_id},
+                )
+                continue
+
             logger.info(
                 "Received text from client",
-                extra={"session_id": session_id, "text": text[:50]},
+                extra={"session_id": session_id, "text_length": len(text)},
             )
 
-            # Transition to speaking state
-            session_manager.transition_state(SessionState.SPEAKING)
+            # Transition to SPEAKING state
+            session_manager.state = SessionState.SPEAKING
 
-            # Synthesize text to audio
-            async for frame in worker_client.synthesize([text]):
-                # Queue audio frame for sending
-                await session_manager.queue_audio_frame(frame.audio_data)
+            # Stream synthesis
+            frame_count = 0
+            async for audio_frame in worker_client.synthesize([text]):
+                frame_count += 1
 
-            # Return to listening state
-            session_manager.transition_state(SessionState.LISTENING)
+                # Send audio to client
+                await session_manager.transport.send_audio_frame(audio_frame.audio_data)
 
+                if audio_frame.is_final:
+                    logger.debug(
+                        "Final audio frame sent",
+                        extra={
+                            "session_id": session_id,
+                            "total_frames": frame_count,
+                        },
+                    )
+                    break
+
+            # Return to LISTENING state
+            session_manager.state = SessionState.LISTENING
+            logger.info(
+                "Synthesis complete",
+                extra={"session_id": session_id, "frames_sent": frame_count},
+            )
+
+    except asyncio.CancelledError:
+        logger.info("Session handler cancelled", extra={"session_id": session_id})
+        raise
     except Exception as e:
-        logger.error(
-            "Error in session handler",
+        logger.exception(
+            "Session handler error",
             extra={"session_id": session_id, "error": str(e)},
         )
+        raise
     finally:
-        # Cleanup
-        logger.info("Session handler ending", extra={"session_id": session_id})
-
-        # Cancel audio sender
-        if "audio_task" in locals():
-            audio_task.cancel()
-            try:
-                await audio_task
-            except asyncio.CancelledError:
-                pass
-
-        # End TTS session
+        # Clean up TTS session
         try:
             await worker_client.end_session()
+            logger.info("TTS session ended", extra={"session_id": session_id})
         except Exception as e:
             logger.warning(
                 "Error ending TTS session",
                 extra={"session_id": session_id, "error": str(e)},
             )
 
-        # Shutdown session
-        await session_manager.shutdown()
 
-        # Log metrics
-        metrics = session_manager.get_metrics_summary()
-        logger.info("Session completed", extra={"metrics": metrics})
+async def start_server(config_path: Path) -> None:
+    """Start orchestrator server with configured transports.
 
-
-async def start_health_server(
-    host: str,
-    port: int,
-    registry: WorkerRegistry | None = None,
-    worker_client: TTSWorkerClient | None = None,
-) -> web.AppRunner:
-    """Start HTTP server for health check endpoints.
+    Initializes all components (config, transport, worker client, health checks)
+    and runs the main server loop until interrupted or error.
 
     Args:
-        host: HTTP server bind host
-        port: HTTP server bind port
-        registry: WorkerRegistry for Redis health checks
-        worker_client: TTSWorkerClient for worker health checks
+        config_path: Path to YAML config file
 
-    Returns:
-        AppRunner instance for graceful shutdown
+    Raises:
+        RuntimeError: If configuration is invalid
+        ConnectionError: If worker connection fails
     """
-    app = web.Application()
-
-    # Set up health check routes
-    setup_health_routes(app, registry=registry, worker_client=worker_client)
-
-    # Start HTTP server
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    site = web.TCPSite(runner, host, port)
-    await site.start()
-
-    logger.info(f"Health check server started on http://{host}:{port}")
-    return runner
-
-
-async def start_server(config_path: Path | None = None) -> None:
-    """Start the orchestrator server with WebSocket transport and health checks.
-
-    Args:
-        config_path: Optional path to configuration file
-    """
-    # Load configuration
-    config = OrchestratorConfig.from_yaml_with_defaults(config_path)
+    # Load config
+    config = OrchestratorConfig.from_yaml(config_path)
+    logger.info("Loaded configuration", extra={"config_path": str(config_path)})
 
     # Configure logging
     logging.basicConfig(
-        level=getattr(logging, config.log_level),
+        level=getattr(logging, config.log_level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    logger.info("Starting orchestrator server", extra={"config": config.model_dump()})
-
-    # Initialize Redis registry (optional for M2, required for M9+)
-    registry: WorkerRegistry | None = None
-    try:
+    # M9: Initialize Redis worker registry (optional)
+    registry = None
+    if config.redis and config.redis.url:
+        logger.info("Initializing worker registry", extra={"redis_url": config.redis.url})
         registry = WorkerRegistry(
             redis_url=config.redis.url,
             db=config.redis.db,
@@ -163,13 +163,7 @@ async def start_server(config_path: Path | None = None) -> None:
             connection_pool_size=config.redis.connection_pool_size,
         )
         await registry.connect()
-        logger.info("Connected to Redis", extra={"url": config.redis.url})
-    except Exception as e:
-        logger.warning(
-            "Failed to connect to Redis (optional for M2)",
-            extra={"error": str(e)},
-        )
-        registry = None
+        logger.info("Worker registry connected")
 
     # Initialize WebSocket transport
     ws_config = config.transport.websocket
@@ -182,6 +176,26 @@ async def start_server(config_path: Path | None = None) -> None:
     # Start transport
     await transport.start()
     logger.info("WebSocket transport started", extra={"port": ws_config.port})
+
+    # Initialize LiveKit transport if enabled
+    livekit_transport = None
+    logger.info("LiveKit config check", extra={
+        "enabled": config.transport.livekit.enabled,
+        "url": config.transport.livekit.url
+    })
+    if config.transport.livekit.enabled:
+        try:
+            from src.orchestrator.transport.livekit_transport import LiveKitTransport
+            
+            lk_config = config.transport.livekit
+            logger.info("Initializing LiveKit transport", extra={"url": lk_config.url})
+            livekit_transport = LiveKitTransport(lk_config)
+            
+            await livekit_transport.start()
+            logger.info("LiveKit transport started", extra={"url": lk_config.url})
+        except Exception as e:
+            logger.error("Failed to start LiveKit transport", extra={"error": str(e)})
+            logger.exception("LiveKit transport error")
 
     # Parse worker address
     worker_addr = config.routing.static_worker_addr
@@ -217,56 +231,75 @@ async def start_server(config_path: Path | None = None) -> None:
 
     # Start health check HTTP server (port 8081 by default)
     health_port = ws_config.port + 1  # Use next port after WebSocket
-    health_runner = await start_health_server(
-        host=ws_config.host,
-        port=health_port,
-        registry=registry,
-        worker_client=worker_client,
-    )
+    health_app = Application()
+    setup_health_routes(health_app, worker_client, transport)
 
-    # Session handling tasks
-    session_tasks: set[asyncio.Task[None]] = set()
+    runner = AppRunner(health_app)
+    await runner.setup()
+    site = TCPSite(runner, "127.0.0.1", health_port)
+    await site.start()
+    logger.info("Health check server started", extra={"port": health_port})
 
+    # Main server loop: accept sessions and spawn handlers
+    session_tasks = []
     try:
-        # Accept client sessions
-        while transport.is_running:
-            try:
-                # Accept next session
-                transport_session = await transport.accept_session()
-
+        logger.info("Orchestrator server ready")
+        
+        # Create tasks for both transports
+        transport_tasks = []
+        
+        # WebSocket transport task
+        async def websocket_loop():
+            while True:
+                session = await transport.accept_session()
                 logger.info(
-                    "Accepted new session",
-                    extra={"session_id": transport_session.session_id},
+                    "New WebSocket session accepted",
+                    extra={"session_id": session.session_id},
                 )
+                session_manager = SessionManager(session)
+                task = asyncio.create_task(handle_session(session_manager, worker_client))
+                session_tasks.append(task)
+        
+        transport_tasks.append(asyncio.create_task(websocket_loop()))
+        
+        # LiveKit transport task (if enabled)
+        if livekit_transport:
+            async def livekit_loop():
+                while True:
+                    session = await livekit_transport.accept_session()
+                    logger.info(
+                        "New LiveKit session accepted",
+                        extra={"session_id": session.session_id},
+                    )
+                    session_manager = SessionManager(session)
+                    task = asyncio.create_task(handle_session(session_manager, worker_client))
+                    session_tasks.append(task)
+            
+            transport_tasks.append(asyncio.create_task(livekit_loop()))
+        
+        # Wait for any transport task to complete (they should run forever)
+        await asyncio.gather(*transport_tasks)
 
-                # Create session manager
-                session_manager = SessionManager(transport_session)
-
-                # Handle session in background task
-                task = asyncio.create_task(
-                    handle_session(session_manager, worker_client)
-                )
-                session_tasks.add(task)
-
-                # Remove task when done
-                task.add_done_callback(session_tasks.discard)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Error accepting session", extra={"error": str(e)})
-
+    except asyncio.CancelledError:
+        logger.info("Server loop cancelled")
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal")
+        logger.info("Received interrupt signal")
+    except Exception as e:
+        logger.exception("Server error", extra={"error": str(e)})
     finally:
-        # Shutdown
         logger.info("Shutting down orchestrator server")
 
-        # Stop health check server
-        await health_runner.cleanup()
-
-        # Stop transport
+        # Stop transports
         await transport.stop()
+        logger.info("WebSocket transport stopped")
+        
+        if livekit_transport:
+            await livekit_transport.stop()
+            logger.info("LiveKit transport stopped")
+
+        # Stop health server
+        await runner.cleanup()
+        logger.info("Health check server stopped")
 
         # Disconnect from worker
         await worker_client.disconnect()
@@ -287,10 +320,17 @@ async def start_server(config_path: Path | None = None) -> None:
 
 def main() -> None:
     """Entry point for orchestrator server."""
-    config_path = Path(__file__).parent.parent.parent / "configs" / "orchestrator.yaml"
+    parser = argparse.ArgumentParser(description="Orchestrator server")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path(__file__).parent.parent.parent / "configs" / "orchestrator.yaml",
+        help="Path to orchestrator config YAML file",
+    )
+    args = parser.parse_args()
 
     try:
-        asyncio.run(start_server(config_path))
+        asyncio.run(start_server(args.config))
     except KeyboardInterrupt:
         logger.info("Orchestrator server interrupted")
 

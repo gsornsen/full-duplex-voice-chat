@@ -13,11 +13,11 @@ transport:
     enabled: true  # Optional - system works without it
     url: "http://localhost:7880"
     api_key: "devkey"
-    api_secret: "secret"
+    api_secret: "devsecret1234567890abcdefghijklmn"
     room_prefix: "tts-session"
 
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://redis:6379"
   db: 0  # Valid range: 0-15
   worker_key_prefix: "worker:"
   worker_ttl_seconds: 30  # Valid range: >= 5

@@ -12,7 +12,7 @@ import pytest
 from livekit import rtc
 
 from src.orchestrator.config import LiveKitConfig
-from src.orchestrator.livekit.room_manager import LiveKitRoomManager
+from src.orchestrator.livekit_utils.room_manager import LiveKitRoomManager
 from src.orchestrator.transport.livekit_transport import (
     LiveKitSession,
     LiveKitTransport,

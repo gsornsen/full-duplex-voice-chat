@@ -6,24 +6,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3.13 \
-    python3.13-dev \
-    python3-pip \
     curl \
     git \
     build-essential \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+# Install uv and set PATH
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    export PATH="/root/.local/bin:$PATH" && \
+    uv --version
+
+# Set PATH for runtime
+ENV PATH="/root/.local/bin:$PATH"
 
 # Set working directory
 WORKDIR /app
 
 # Copy project files
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 COPY configs/ ./configs/
 
@@ -31,13 +32,13 @@ COPY configs/ ./configs/
 RUN mkdir -p voicepacks
 
 # Install Python dependencies
-RUN uv sync --frozen
+RUN export PATH="/root/.local/bin:$PATH" && uv sync --frozen
 
 # Expose gRPC port
-EXPOSE 7002
+EXPOSE 7001
 
 # Expose metrics port
 EXPOSE 9090
 
-# Default command
-CMD ["uv", "run", "python", "-m", "src.tts.worker", "--config", "configs/worker.yaml"]
+# Default command - run worker_main module
+CMD ["uv", "run", "python", "-m", "src.tts.worker_main"]

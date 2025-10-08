@@ -94,6 +94,44 @@ pytest -k "test_speech"
 
 ---
 
+## Performance Tests (Manual Only)
+
+Performance tests are isolated in `tests/performance/` and are **NOT run automatically** in CI or with `just test`.
+
+**Why separate?**
+- Performance tests can take 10-15 minutes to complete
+- Some tests may segfault due to Python 3.13.6 issues with concurrent websockets
+- Tests require significant system resources (4+ GB RAM)
+- Results are more meaningful on isolated systems without background load
+
+**To run performance tests:**
+```bash
+just test-performance
+```
+
+Or with pytest directly:
+```bash
+uv run pytest tests/performance/ -v -m performance
+```
+
+**Run specific performance test:**
+```bash
+uv run pytest tests/performance/test_performance.py::test_fal_single_session -v
+```
+
+**Important notes:**
+- Performance tests require Docker containers (Redis, TTS worker)
+- Some concurrent tests may be unstable (known Python 3.13.6 websockets issue)
+- Run on a system with minimal background processes for reliable benchmarks
+
+See [`tests/performance/README.md`](../tests/performance/README.md) for detailed information on:
+- Performance targets (FAL, frame jitter, throughput)
+- Individual test descriptions
+- Troubleshooting guidance
+- Result interpretation
+
+---
+
 ## Test Markers
 
 Tests are marked with pytest markers to categorize and selectively run them.

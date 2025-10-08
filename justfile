@@ -19,11 +19,30 @@ fix:
 typecheck:
     uv run mypy src/ tests/
 
-# Run pytest tests
+# Run pytest tests (excludes performance benchmarks and integration tests requiring Docker)
 test:
-    uv run pytest tests/
+    uv run pytest tests/ -v -m "not performance and not docker"
 
-# Run all checks (lint + typecheck + test)
+# Run integration tests (requires Docker services to be running)
+test-integration:
+    #!/usr/bin/env bash
+    set -e
+    echo "Note: Integration tests require Docker services to be running."
+    echo "Start services with: docker compose up -d"
+    echo ""
+    uv run pytest tests/integration/ -v -m "integration"
+
+# Run performance benchmarks with process isolation (requires Docker services)
+test-performance:
+    #!/usr/bin/env bash
+    set -e
+    echo "Note: Performance tests require Docker services to be running."
+    echo "Start services with: docker compose up -d"
+    echo ""
+    echo "Running performance tests with --forked flag for process isolation..."
+    uv run pytest tests/performance/test_performance.py --forked -v -m performance
+
+# Run all checks (lint + typecheck + test) - excludes Docker-dependent tests
 ci: lint typecheck test
 
 # Infrastructure
@@ -47,7 +66,7 @@ gen-proto:
         --python_out=src/rpc/generated \
         --grpc_python_out=src/rpc/generated \
         --pyi_out=src/rpc/generated \
-        src/rpc/tts.proto
+        src/rpc/tts.proto && sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
 
 # Runtime (Single-GPU)
 # --------------------
@@ -124,6 +143,46 @@ docker-logs:
 # View specific service logs
 docker-logs-service SERVICE:
     docker compose logs -f {{SERVICE}}
+
+# HTTPS Setup for Local Network Access
+# -------------------------------------
+
+# Update Caddyfile and .env.local with current host IP
+update-ip IP="":
+    #!/usr/bin/env bash
+    if [[ -z "{{IP}}" ]]; then
+        ./scripts/update-ip.sh
+    else
+        ./scripts/update-ip.sh --ip {{IP}}
+    fi
+
+# Show current IP address
+show-ip:
+    @hostname -I | awk '{print $1}'
+
+# Restart Caddy to apply configuration changes
+caddy-restart:
+    docker compose restart caddy
+
+# View Caddy logs
+caddy-logs:
+    docker compose logs -f caddy
+
+# Test HTTPS setup (requires services to be running)
+test-https:
+    #!/usr/bin/env bash
+    IP=$(hostname -I | awk '{print $1}')
+    echo "Testing HTTPS endpoints..."
+    echo ""
+    echo "1. Testing web client (HTTPS):"
+    curl -k -I "https://$IP" || echo "Failed to connect to web client"
+    echo ""
+    echo "2. Testing LiveKit (WSS):"
+    curl -k -I "https://$IP:7443" || echo "Failed to connect to LiveKit"
+    echo ""
+    echo "Access URLs:"
+    echo "  Web Client: https://$IP"
+    echo "  LiveKit WSS: wss://$IP:7443"
 
 # Development
 # -----------

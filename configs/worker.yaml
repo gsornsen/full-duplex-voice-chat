@@ -3,7 +3,7 @@
 worker:
   name: "tts-worker-0"
   grpc_host: "0.0.0.0"
-  grpc_port: 7002  # Valid range: 1024-65535
+  grpc_port: 7001  # Valid range: 1024-65535
 
   # Worker capabilities
   capabilities:
