@@ -32,7 +32,8 @@
       "Bash(uv:*)",
       "Bash(/home/gerald/git/full-duplex-voice-chat/.venv/bin/pytest tests/integration/test_m1_worker_integration.py::test_load_unload_model -v --tb=short)",
       "Bash(/home/gerald/git/full-duplex-voice-chat/.venv/bin/pytest tests/integration/test_m1_worker_integration.py -v)",
-      "Bash(echo \"Exit code: $?\")"
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

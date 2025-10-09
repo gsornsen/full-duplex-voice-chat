@@ -119,31 +119,34 @@ def test_orchestrator_config_defaults() -> None:
     assert config.log_level == "INFO"
     assert config.graceful_shutdown_timeout_s == 10
 
-@patch("os.getenv", return_value=None)
-def test_orchestrator_config_from_yaml(tmp_path: Path) -> None:
+
+@patch("os.getenv")
+def test_orchestrator_config_from_yaml(mock_getenv, tmp_path: Path) -> None:
     """Test loading configuration from YAML file."""
+    # Mock os.getenv to return None (no environment overrides)
+    mock_getenv.return_value = None
+
     # Create temporary config file
     config_file = tmp_path / "test_config.yaml"
     config_file.write_text(
-        """
-        transport:
-        websocket:
-            enabled: true
-            port: 9000
-        livekit:
-            enabled: false
+        """transport:
+  websocket:
+    enabled: true
+    port: 9000
+  livekit:
+    enabled: false
 
-        redis:
-        url: "redis://testhost:6379"
+redis:
+  url: "redis://testhost:6379"
 
-        routing:
-        static_worker_addr: "grpc://worker:7001"
+routing:
+  static_worker_addr: "grpc://worker:7001"
 
-        vad:
-        aggressiveness: 3
+vad:
+  aggressiveness: 3
 
-        log_level: "DEBUG"
-        """
+log_level: "DEBUG"
+"""
     )
 
     # Load config
@@ -158,31 +161,38 @@ def test_orchestrator_config_from_yaml(tmp_path: Path) -> None:
     assert config.log_level == "DEBUG"
 
 
-@patch("os.getenv", return_value="redis://patched_host:6379")
-def test_orchestrator_config_from_yaml_with_environment_variable_overrides(tmp_path: Path) -> None:
-    """Test loading configuration from YAML file."""
+@patch("os.getenv")
+def test_orchestrator_config_from_yaml_with_env_overrides(mock_getenv, tmp_path: Path) -> None:
+    """Test loading configuration from YAML file with environment variable overrides."""
+    # Mock os.getenv to return override URL for REDIS_URL
+    def getenv_side_effect(key):
+        if key == "REDIS_URL":
+            return "redis://patched_host:6379"
+        return None
+
+    mock_getenv.side_effect = getenv_side_effect
+
     # Create temporary config file
     config_file = tmp_path / "test_config.yaml"
     config_file.write_text(
-        """
-        transport:
-        websocket:
-            enabled: true
-            port: 9000
-        livekit:
-            enabled: false
+        """transport:
+  websocket:
+    enabled: true
+    port: 9000
+  livekit:
+    enabled: false
 
-        redis:
-        url: "redis://testhost:6379"
+redis:
+  url: "redis://testhost:6379"
 
-        routing:
-        static_worker_addr: "grpc://worker:7001"
+routing:
+  static_worker_addr: "grpc://worker:7001"
 
-        vad:
-        aggressiveness: 3
+vad:
+  aggressiveness: 3
 
-        log_level: "DEBUG"
-        """
+log_level: "DEBUG"
+"""
     )
 
     # Load config
@@ -191,7 +201,7 @@ def test_orchestrator_config_from_yaml_with_environment_variable_overrides(tmp_p
     # Verify loaded values with environment variable overrides
     assert config.transport.websocket.port == 9000
     assert config.transport.livekit.enabled is False
-    assert config.redis.url == "redis://patched_host:6379"
+    assert config.redis.url == "redis://patched_host:6379"  # Should be overridden
     assert config.routing.static_worker_addr == "grpc://worker:7001"
     assert config.vad.aggressiveness == 3
     assert config.log_level == "DEBUG"
@@ -218,8 +228,7 @@ def test_orchestrator_config_from_yaml_with_defaults_exists(tmp_path: Path) -> N
     """Test loading config with defaults when file exists."""
     config_file = tmp_path / "test_config.yaml"
     config_file.write_text(
-        """
-transport:
+        """transport:
   websocket:
     port: 9000
 """

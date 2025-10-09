@@ -19,6 +19,7 @@ from base64 import b64decode
 from typing import Any
 
 import pytest
+from websockets.protocol import State
 
 from tests.integration.conftest import (
     FrameTimingValidator,
@@ -154,8 +155,8 @@ async def test_websocket_session_lifecycle(orchestrator_server: Any, ws_client: 
     await ws_client.close()
     logger.info("WebSocket connection closed")
 
-    # Connection should be closed
-    assert ws_client.closed, "WebSocket not closed"
+    # Connection should be closed (use state property in websockets 15.x)
+    assert ws_client.state == State.CLOSED, "WebSocket not closed"
 
 
 @pytest.mark.asyncio

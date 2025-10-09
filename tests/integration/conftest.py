@@ -29,6 +29,7 @@ from websockets.asyncio.client import ClientConnection
 from src.orchestrator.config import (
     LiveKitConfig,
     OrchestratorConfig,
+    RedisConfig,
     RoutingConfig,
     TransportConfig,
     WebSocketConfig,
@@ -371,7 +372,7 @@ async def orchestrator_server(
             livekit=LiveKitConfig(enabled=False),
         ),
         routing=RoutingConfig(static_worker_addr=f"grpc://{mock_tts_worker}"),
-        redis={"url": redis_container},  # Use test Redis URL
+        redis=RedisConfig(url=redis_container),  # Use RedisConfig model
         log_level="INFO",
     )
 

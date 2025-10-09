@@ -291,33 +291,48 @@ class TestWebSocketTransport:
 
     @pytest.mark.asyncio
     async def test_transport_start_stop(self) -> None:
-        """Test transport start and stop."""
-        transport = WebSocketTransport(host="127.0.0.1", port=8081, max_connections=10)
+        """Test transport start and stop.
 
-        # Start transport
-        await transport.start()
-        assert transport.is_running is True
+        Uses dynamic port allocation (port=0) to avoid conflicts.
+        """
+        # Use port=0 to let OS assign an available port
+        transport = WebSocketTransport(host="127.0.0.1", port=0, max_connections=10)
 
-        # Stop transport
-        await transport.stop()
-        assert transport.is_running is False
+        try:
+            # Start transport
+            await transport.start()
+            assert transport.is_running is True
+
+            # Stop transport
+            await transport.stop()
+            assert transport.is_running is False
+        finally:
+            # Ensure cleanup even on test failure
+            if transport.is_running:
+                await transport.stop()
 
     @pytest.mark.asyncio
     async def test_transport_double_start(self) -> None:
-        """Test starting transport twice."""
-        transport = WebSocketTransport(host="127.0.0.1", port=8082, max_connections=10)
+        """Test starting transport twice.
 
-        await transport.start()
+        Uses dynamic port allocation (port=0) to avoid conflicts.
+        """
+        # Use port=0 to let OS assign an available port
+        transport = WebSocketTransport(host="127.0.0.1", port=0, max_connections=10)
 
-        with pytest.raises(RuntimeError, match="already running"):
+        try:
             await transport.start()
 
-        await transport.stop()
+            with pytest.raises(RuntimeError, match="already running"):
+                await transport.start()
+        finally:
+            # Ensure cleanup even on test failure
+            await transport.stop()
 
     @pytest.mark.asyncio
     async def test_accept_session_not_running(self) -> None:
         """Test accepting session when transport not running."""
-        transport = WebSocketTransport(host="127.0.0.1", port=8083, max_connections=10)
+        transport = WebSocketTransport(host="127.0.0.1", port=0, max_connections=10)
 
         with pytest.raises(RuntimeError, match="not running"):
             await transport.accept_session()
