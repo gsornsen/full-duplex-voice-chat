@@ -1,5 +1,5 @@
 # Orchestrator Configuration
-# M2: WebSocket + LiveKit transport, VAD stub, static routing
+# M3: VAD integration for barge-in, WebSocket + LiveKit transport, static routing
 
 transport:
   websocket:
@@ -36,6 +36,8 @@ vad:
   aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
   sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
   frame_duration_ms: 20  # Valid values: 10, 20, 30
+  min_speech_duration_ms: 100  # Minimum speech duration to trigger barge-in (debouncing)
+  min_silence_duration_ms: 300  # Minimum silence duration to resume synthesis (debouncing)
 
 # Operational settings
 log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL

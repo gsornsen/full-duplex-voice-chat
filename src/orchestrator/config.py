@@ -91,7 +91,7 @@ class VADConfig(BaseModel):
 
     enabled: bool = Field(
         default=True,
-        description="Enable VAD processing (stub for M2, active in M3+)",
+        description="Enable VAD processing for barge-in detection (M3+)",
     )
     aggressiveness: int = Field(
         default=2,
@@ -106,6 +106,16 @@ class VADConfig(BaseModel):
     frame_duration_ms: int = Field(
         default=20,
         description="VAD frame duration in milliseconds",
+    )
+    min_speech_duration_ms: float = Field(
+        default=100,
+        ge=0,
+        description="Minimum speech duration to trigger speech_start event (debouncing)",
+    )
+    min_silence_duration_ms: float = Field(
+        default=300,
+        ge=0,
+        description="Minimum silence duration to trigger speech_end event (debouncing)",
     )
 
     @field_validator("sample_rate")

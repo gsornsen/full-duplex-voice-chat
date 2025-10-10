@@ -6,11 +6,13 @@ Main server implementation that:
 3. Accepts client sessions
 4. Forwards text to TTS worker via gRPC
 5. Streams audio back to clients
+6. Processes incoming audio through VAD for barge-in detection (M3+)
 """
 
 import argparse
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 import grpc
@@ -22,6 +24,7 @@ from src.orchestrator.health import setup_health_routes
 from src.orchestrator.registry import WorkerRegistry
 from src.orchestrator.session import SessionManager, SessionState
 from src.orchestrator.transport.websocket_transport import WebSocketTransport
+from src.orchestrator.vad_processor import VADAudioProcessor
 from src.rpc.generated import tts_pb2
 
 logger = logging.getLogger(__name__)
@@ -49,12 +52,16 @@ def _validate_audio_frame(frame: tts_pb2.AudioFrame) -> bool:
     return True
 
 
-async def handle_session(session_manager: SessionManager, worker_client: TTSWorkerClient) -> None:
-    """Handle a single client session.
+async def handle_session(
+    session_manager: SessionManager,
+    worker_client: TTSWorkerClient,
+    vad_config: OrchestratorConfig,
+) -> None:
+    """Handle a single client session with VAD-based barge-in.
 
     Processes text input from the session, forwards it to the TTS worker,
-    and streams audio back to the client. Handles session lifecycle and
-    error cases.
+    and streams audio back to the client. Handles session lifecycle,
+    error cases, and VAD-based barge-in interruption.
 
     Protocol Handling:
     - Supports both Final Data Frame and End Marker patterns
@@ -63,17 +70,70 @@ async def handle_session(session_manager: SessionManager, worker_client: TTSWork
     - Returns to LISTENING state after each synthesis for next message
     - Supports multiple messages per session
 
+    Barge-in Handling (M3+):
+    - Processes incoming audio through VAD
+    - Detects speech_start → sends PAUSE to worker → transitions to BARGED_IN
+    - Detects speech_end → sends RESUME to worker → transitions to LISTENING
+    - Tracks barge-in latency metrics
+
     Args:
         session_manager: Manager for this session
         worker_client: TTS worker gRPC client
+        vad_config: Orchestrator configuration with VAD settings
 
     Notes:
         This coroutine runs for the duration of the session, from client
         connection through to disconnect or error. It maintains the session
-        state machine (LISTENING → SPEAKING → LISTENING) and coordinates
-        with the worker.
+        state machine (LISTENING → SPEAKING → BARGED_IN → LISTENING) and
+        coordinates with the worker.
     """
     session_id = session_manager.session_id
+
+    # Initialize VAD processor if enabled
+    vad_processor: VADAudioProcessor | None = None
+    if vad_config.vad.enabled:
+
+        def on_speech_start(timestamp_ms: float) -> None:
+            """Handle VAD speech detection (barge-in trigger)."""
+            # Only trigger barge-in if we're currently speaking
+            if session_manager.state == SessionState.SPEAKING:
+                logger.info(
+                    "Barge-in detected (speech start)",
+                    extra={
+                        "session_id": session_id,
+                        "vad_timestamp_ms": timestamp_ms,
+                    },
+                )
+
+                # Record barge-in start time for latency tracking
+                asyncio.create_task(_handle_barge_in_pause(session_manager, worker_client))
+
+        def on_speech_end(timestamp_ms: float) -> None:
+            """Handle VAD silence detection (resume trigger)."""
+            # Only resume if we're in BARGED_IN state
+            if session_manager.state == SessionState.BARGED_IN:
+                logger.info(
+                    "Silence detected after barge-in (speech end)",
+                    extra={
+                        "session_id": session_id,
+                        "vad_timestamp_ms": timestamp_ms,
+                    },
+                )
+
+                # Note: We transition back to LISTENING, not RESUME synthesis
+                # This allows the user to provide new input
+                session_manager.transition_state(SessionState.LISTENING)
+
+        vad_processor = VADAudioProcessor(
+            config=vad_config.vad,
+            on_speech_start=on_speech_start,
+            on_speech_end=on_speech_end,
+        )
+
+        logger.info(
+            "VAD processor initialized for session",
+            extra={"session_id": session_id, "enabled": vad_processor.is_enabled},
+        )
 
     try:
         logger.info("Starting session handler", extra={"session_id": session_id})
@@ -120,12 +180,26 @@ async def handle_session(session_manager: SessionManager, worker_client: TTSWork
             )
 
             # Transition to SPEAKING state
-            session_manager.state = SessionState.SPEAKING
+            session_manager.transition_state(SessionState.SPEAKING)
+
+            # Reset VAD state for new synthesis
+            if vad_processor:
+                vad_processor.reset()
 
             try:
                 # Stream synthesis
                 frame_count = 0
                 async for audio_frame in worker_client.synthesize([text]):
+                    # Check if we were interrupted by barge-in
+                    if session_manager.state == SessionState.BARGED_IN:
+                        logger.info(
+                            "Synthesis interrupted by barge-in, stopping stream",
+                            extra={"session_id": session_id, "frames_sent": frame_count},
+                        )
+                        # Stop synthesis - we're now in BARGED_IN state waiting for user
+                        await worker_client.control("STOP")
+                        break
+
                     # Validate frame
                     if not _validate_audio_frame(audio_frame):
                         logger.warning(
@@ -164,12 +238,13 @@ async def handle_session(session_manager: SessionManager, worker_client: TTSWork
                         )
                         break
 
-                # Return to LISTENING state (session continues for next message)
-                session_manager.state = SessionState.LISTENING
-                logger.info(
-                    "Synthesis complete, ready for next message",
-                    extra={"session_id": session_id, "frames_sent": frame_count},
-                )
+                # Return to LISTENING state if not already interrupted
+                if session_manager.state != SessionState.BARGED_IN:
+                    session_manager.transition_state(SessionState.LISTENING)
+                    logger.info(
+                        "Synthesis complete, ready for next message",
+                        extra={"session_id": session_id, "frames_sent": frame_count},
+                    )
 
             except grpc.RpcError as e:
                 logger.error(
@@ -177,7 +252,7 @@ async def handle_session(session_manager: SessionManager, worker_client: TTSWork
                     extra={"session_id": session_id, "error": str(e)},
                 )
                 # Don't break session - return to LISTENING for retry
-                session_manager.state = SessionState.LISTENING
+                session_manager.transition_state(SessionState.LISTENING)
                 continue
             except Exception as e:
                 logger.exception(
@@ -208,6 +283,72 @@ async def handle_session(session_manager: SessionManager, worker_client: TTSWork
                 "Error ending TTS session",
                 extra={"session_id": session_id, "error": str(e)},
             )
+
+        # Log final metrics including barge-in stats
+        metrics = session_manager.get_metrics_summary()
+        logger.info("Session metrics", extra={"session_id": session_id, **metrics})
+
+        if vad_processor and vad_processor.is_enabled:
+            vad_stats = vad_processor.stats
+            logger.info("VAD statistics", extra={"session_id": session_id, **vad_stats})
+
+
+async def _handle_barge_in_pause(
+    session_manager: SessionManager,
+    worker_client: TTSWorkerClient,
+) -> None:
+    """Handle barge-in PAUSE command with latency tracking.
+
+    Args:
+        session_manager: Session manager for state and metrics
+        worker_client: Worker client for sending PAUSE command
+    """
+    session_id = session_manager.session_id
+    barge_in_start = time.monotonic()
+
+    try:
+        # Send PAUSE command to worker
+        success = await worker_client.control("PAUSE")
+
+        if success:
+            # Calculate latency
+            latency_ms = (time.monotonic() - barge_in_start) * 1000.0
+
+            # Transition to BARGED_IN state
+            session_manager.transition_state(SessionState.BARGED_IN)
+
+            # Record metrics
+            session_manager.metrics.record_barge_in(latency_ms)
+
+            logger.info(
+                "Barge-in PAUSE completed",
+                extra={
+                    "session_id": session_id,
+                    "latency_ms": latency_ms,
+                },
+            )
+
+            # Check if we met SLA (<50ms p95)
+            if latency_ms > 50:
+                logger.warning(
+                    "Barge-in latency exceeded SLA",
+                    extra={
+                        "session_id": session_id,
+                        "latency_ms": latency_ms,
+                        "sla_ms": 50,
+                    },
+                )
+        else:
+            logger.error(
+                "Barge-in PAUSE command failed",
+                extra={"session_id": session_id},
+            )
+
+    except Exception as e:
+        logger.error(
+            "Error handling barge-in PAUSE",
+            extra={"session_id": session_id, "error": str(e)},
+        )
 
 
 async def start_server(config_path: Path) -> None:
@@ -325,7 +466,10 @@ async def start_server(config_path: Path) -> None:
     # Main server loop: accept sessions and spawn handlers
     session_tasks = []
     try:
-        logger.info("Orchestrator server ready")
+        logger.info(
+            "Orchestrator server ready",
+            extra={"vad_enabled": config.vad.enabled},
+        )
 
         # Create tasks for both transports
         transport_tasks = []
@@ -339,7 +483,7 @@ async def start_server(config_path: Path) -> None:
                     extra={"session_id": session.session_id},
                 )
                 session_manager = SessionManager(session)
-                task = asyncio.create_task(handle_session(session_manager, worker_client))
+                task = asyncio.create_task(handle_session(session_manager, worker_client, config))
                 session_tasks.append(task)
 
         transport_tasks.append(asyncio.create_task(websocket_loop()))
@@ -355,7 +499,9 @@ async def start_server(config_path: Path) -> None:
                         extra={"session_id": session.session_id},
                     )
                     session_manager = SessionManager(session)
-                    task = asyncio.create_task(handle_session(session_manager, worker_client))
+                    task = asyncio.create_task(
+                        handle_session(session_manager, worker_client, config)
+                    )
                     session_tasks.append(task)
 
             transport_tasks.append(asyncio.create_task(livekit_loop()))

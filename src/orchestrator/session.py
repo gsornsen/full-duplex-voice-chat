@@ -76,9 +76,10 @@ class SessionMetrics:
     # Frame timing (for jitter analysis)
     frame_send_times: deque[float] = field(default_factory=lambda: deque(maxlen=100))
 
-    # Future: barge-in metrics (M3+)
+    # Barge-in metrics (M3+)
     barge_in_count: int = 0
     barge_in_latencies_ms: list[float] = field(default_factory=list)
+    last_barge_in_detected_ts: float | None = None  # Timestamp of last barge-in detection
 
     def record_text_received(self) -> None:
         """Record that a text chunk was received."""
@@ -99,6 +100,16 @@ class SessionMetrics:
         # Track frame timing for jitter analysis
         self.frame_send_times.append(now)
 
+    def record_barge_in(self, latency_ms: float) -> None:
+        """Record a barge-in event.
+
+        Args:
+            latency_ms: Time from speech detection to PAUSE command completion
+        """
+        self.barge_in_count += 1
+        self.barge_in_latencies_ms.append(latency_ms)
+        self.last_barge_in_detected_ts = time.monotonic()
+
     def compute_frame_jitter_ms(self) -> float | None:
         """Compute frame timing jitter (standard deviation of inter-frame intervals).
 
@@ -117,6 +128,29 @@ class SessionMetrics:
         mean = sum(intervals) / len(intervals)
         variance = sum((x - mean) ** 2 for x in intervals) / len(intervals)
         return math.sqrt(variance)
+
+    def compute_avg_barge_in_latency_ms(self) -> float | None:
+        """Compute average barge-in latency.
+
+        Returns:
+            float: Average latency in milliseconds, or None if no barge-ins
+        """
+        if not self.barge_in_latencies_ms:
+            return None
+        return sum(self.barge_in_latencies_ms) / len(self.barge_in_latencies_ms)
+
+    def compute_p95_barge_in_latency_ms(self) -> float | None:
+        """Compute 95th percentile barge-in latency.
+
+        Returns:
+            float: P95 latency in milliseconds, or None if no barge-ins
+        """
+        if not self.barge_in_latencies_ms:
+            return None
+
+        sorted_latencies = sorted(self.barge_in_latencies_ms)
+        p95_index = int(len(sorted_latencies) * 0.95)
+        return sorted_latencies[min(p95_index, len(sorted_latencies) - 1)]
 
     def finalize(self) -> None:
         """Mark session as complete and record end time."""
@@ -311,6 +345,9 @@ class SessionManager:
             "frame_count": self.metrics.frame_count,
             "text_chunks": self.metrics.text_chunks_received,
             "frame_jitter_ms": self.metrics.compute_frame_jitter_ms(),
+            "barge_in_count": self.metrics.barge_in_count,
+            "avg_barge_in_latency_ms": self.metrics.compute_avg_barge_in_latency_ms(),
+            "p95_barge_in_latency_ms": self.metrics.compute_p95_barge_in_latency_ms(),
             "session_duration_s": (
                 (self.metrics.session_end_ts or time.monotonic()) - self.metrics.session_start_ts
             ),
