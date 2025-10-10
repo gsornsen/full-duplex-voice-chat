@@ -18,9 +18,8 @@ import subprocess
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import grpc
 import numpy as np
 import pytest
 import pytest_asyncio
@@ -39,8 +38,13 @@ from src.orchestrator.config import (
 )
 from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
 from src.orchestrator.server import start_server
-from src.rpc.generated import tts_pb2, tts_pb2_grpc
-from src.tts.worker import start_worker
+
+# Lazy imports for gRPC - only imported when gRPC fixtures are used
+# This prevents segfault issues when running non-gRPC tests
+if TYPE_CHECKING:
+    import grpc
+    from src.rpc.generated import tts_pb2, tts_pb2_grpc
+    from src.tts.worker import start_worker
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +77,7 @@ def get_free_port() -> int:
 # ============================================================================
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def grpc_event_loop_workaround() -> Iterable[None]:
     """Workaround for grpc-python event loop cleanup issues.
 
@@ -84,6 +88,9 @@ def grpc_event_loop_workaround() -> Iterable[None]:
     This fixture:
     1. Disables GC during tests to prevent premature cleanup
     2. Adds a delay after each test to allow grpc threads to finish
+
+    NOTE: This fixture is NOT autouse - only gRPC tests should explicitly use it.
+    Non-gRPC tests (like VAD tests) should not require this workaround.
 
     See: https://github.com/grpc/grpc/issues/37714
     """
@@ -297,6 +304,11 @@ async def mock_tts_worker() -> AsyncIterator[str]:
         Uses dynamic port allocation to avoid conflicts when multiple
         tests run in parallel or sequentially.
     """
+    # Lazy imports - only import when this fixture is used
+    import grpc.aio
+    from src.rpc.generated import tts_pb2, tts_pb2_grpc
+    from src.tts.worker import start_worker
+
     # Use dynamic port allocation to avoid conflicts
     port = get_free_port()
     addr = f"localhost:{port}"
