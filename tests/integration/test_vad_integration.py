@@ -9,6 +9,10 @@ Tests Voice Activity Detection integration:
 
 Note: These tests use relaxed timing tolerances for CI environments where
 VAD behavior may vary due to system load and audio characteristics.
+
+VAD Hysteresis: WebRTC VAD includes built-in smoothing that continues to
+report "speech" for ~6 frames (120ms @ 16kHz) after actual speech ends.
+Tests must account for this hysteresis when calculating timing expectations.
 """
 
 import logging
@@ -305,9 +309,15 @@ async def test_vad_multiple_speech_segments() -> None:
     - Multiple speech segments detected correctly
     - Each segment gets separate start/end events
     - Events match expected pattern
+
+    Note: This test accounts for VAD hysteresis (~120ms @ aggressiveness=2)
+    where the VAD continues to report "speech" for several frames after
+    actual speech ends. The min_silence_duration is set to 200ms to ensure
+    reliable detection despite this behavior.
     """
     config = VADConfig(aggressiveness=2, sample_rate=16000, frame_duration_ms=20)
-    vad = VADProcessor(config=config, min_speech_duration_ms=100, min_silence_duration_ms=300)
+    # Use 200ms silence threshold to account for ~120ms VAD hysteresis
+    vad = VADProcessor(config=config, min_speech_duration_ms=100, min_silence_duration_ms=200)
 
     speech_start_events = []
     speech_end_events = []
@@ -316,32 +326,39 @@ async def test_vad_multiple_speech_segments() -> None:
     vad.on_speech_end = lambda ts: speech_end_events.append(ts)
 
     # Pattern: silence → speech → silence → speech → silence
-    # Segment 1
+    # Initial silence (100ms = 5 frames)
     for _ in range(5):
         vad.process_frame(generate_silence(duration_ms=20, sample_rate=16000))
 
-    for _ in range(10):  # 200ms speech
+    # Segment 1: Speech (200ms = 10 frames)
+    for _ in range(10):
         vad.process_frame(generate_speech_audio(duration_ms=20, sample_rate=16000))
 
-    for _ in range(20):  # 400ms silence
+    # Silence gap (500ms = 25 frames - enough for VAD hysteresis + debouncing)
+    for _ in range(25):
         vad.process_frame(generate_silence(duration_ms=20, sample_rate=16000))
 
-    # Segment 2
-    for _ in range(10):  # 200ms speech
+    # Segment 2: Speech (200ms = 10 frames)
+    for _ in range(10):
         vad.process_frame(generate_speech_audio(duration_ms=20, sample_rate=16000))
 
-    for _ in range(20):  # 400ms silence
+    # Final silence (500ms = 25 frames - ensure end event triggers)
+    for _ in range(25):
         vad.process_frame(generate_silence(duration_ms=20, sample_rate=16000))
 
     # Validate events (allow some tolerance for VAD behavior)
-    logger.info(f"Speech segments: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
+    logger.info(
+        f"Speech segments: starts={len(speech_start_events)}, ends={len(speech_end_events)}, "
+        f"start_times={speech_start_events}, end_times={speech_end_events}"
+    )
 
     # Expect at least 1 start/end pair, ideally 2
     assert len(speech_start_events) >= 1, (
         f"Expected at least 1 speech start, got {len(speech_start_events)}"
     )
     assert len(speech_end_events) >= 1, (
-        f"Expected at least 1 speech end, got {len(speech_end_events)}"
+        f"Expected at least 1 speech end, got {len(speech_end_events)}. "
+        f"This may indicate VAD hysteresis preventing silence detection."
     )
 
     # Verify event ordering (starts before ends)
