@@ -2,7 +2,7 @@
 
 This module implements the gRPC server that hosts TTS adapters and serves
 text-to-speech requests. It handles session management, streaming synthesis,
-control commands, and model lifecycle operations.
+control commands, and model lifecycle operations via the ModelManager.
 """
 
 import logging
@@ -11,9 +11,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import grpc
+import yaml
 
 from src.rpc.generated import tts_pb2, tts_pb2_grpc
-from src.tts.adapters.adapter_mock import MockTTSAdapter
+from src.tts.model_manager import ModelManager
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +70,24 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
     """gRPC servicer for TTS worker.
 
     This servicer implements the TTSService interface, managing TTS sessions
-    and routing requests to the appropriate adapter instances. Each session
-    maintains its own adapter instance for isolation and concurrent processing.
+    and routing requests to the appropriate adapter instances via the ModelManager.
+    Each session maintains its own adapter instance for isolation and concurrent processing.
 
     Attributes:
+        model_manager: ModelManager instance for model lifecycle
         sessions: Dictionary mapping session_id to session metadata
         adapters: Dictionary mapping session_id to adapter instances
     """
 
-    def __init__(self) -> None:
-        """Initialize the TTS worker servicer."""
+    def __init__(self, model_manager: ModelManager) -> None:
+        """Initialize the TTS worker servicer.
+
+        Args:
+            model_manager: ModelManager instance for model lifecycle
+        """
+        self.model_manager = model_manager
         self.sessions: dict[str, dict[str, Any]] = {}
-        self.adapters: dict[str, MockTTSAdapter] = {}
+        self.adapters: dict[str, Any] = {}
         logger.info("TTSWorkerServicer initialized")
 
     async def StartSession(
@@ -88,8 +95,8 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
     ) -> tts_pb2.StartSessionResponse:
         """Start a new TTS session.
 
-        Creates a new session with a dedicated adapter instance. Sessions are
-        isolated to support concurrent requests from multiple clients.
+        Creates a new session with a dedicated adapter instance from the ModelManager.
+        Sessions are isolated to support concurrent requests from multiple clients.
 
         Args:
             request: StartSessionRequest with session_id, model_id, and options
@@ -99,36 +106,47 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
             StartSessionResponse indicating success or failure
         """
         session_id = request.session_id
-        model_id = request.model_id or "mock-440hz"
+        model_id = request.model_id or self.model_manager.default_model_id
 
         logger.info(
             "Starting session",
             extra={"session_id": session_id, "model_id": model_id},
         )
 
-        # Create adapter for this session
-        adapter = MockTTSAdapter()
-        self.adapters[session_id] = adapter
-        self.sessions[session_id] = {
-            "model_id": model_id,
-            "options": dict(request.options),
-            "adapter": adapter,
-        }
+        try:
+            # Load model (increments refcount, returns existing if already loaded)
+            adapter = await self.model_manager.load(model_id)
 
-        logger.info(
-            "Session started successfully",
-            extra={"session_id": session_id, "active_sessions": len(self.sessions)},
-        )
+            self.adapters[session_id] = adapter
+            self.sessions[session_id] = {
+                "model_id": model_id,
+                "options": dict(request.options),
+                "adapter": adapter,
+            }
 
-        return tts_pb2.StartSessionResponse(success=True, message="Session started")
+            logger.info(
+                "Session started successfully",
+                extra={"session_id": session_id, "active_sessions": len(self.sessions)},
+            )
+
+            return tts_pb2.StartSessionResponse(success=True, message="Session started")
+
+        except Exception as e:
+            logger.error(
+                "Failed to start session",
+                extra={"session_id": session_id, "model_id": model_id, "error": str(e)},
+            )
+            return tts_pb2.StartSessionResponse(
+                success=False, message=f"Failed to start session: {e}"
+            )
 
     async def EndSession(
         self, request: tts_pb2.EndSessionRequest, context: grpc.aio.ServicerContext
     ) -> tts_pb2.EndSessionResponse:
         """End a TTS session.
 
-        Cleans up session resources and removes the adapter instance. This
-        should be called when the client is done with the session.
+        Cleans up session resources and releases the model reference count.
+        This should be called when the client is done with the session.
 
         Args:
             request: EndSessionRequest with session_id
@@ -141,7 +159,18 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
 
         logger.info("Ending session", extra={"session_id": session_id})
 
-        # Clean up
+        # Release model reference
+        if session_id in self.sessions:
+            model_id = self.sessions[session_id]["model_id"]
+            try:
+                await self.model_manager.release(model_id)
+            except Exception as e:
+                logger.warning(
+                    "Error releasing model",
+                    extra={"session_id": session_id, "model_id": model_id, "error": str(e)},
+                )
+
+        # Clean up session
         if session_id in self.adapters:
             del self.adapters[session_id]
         if session_id in self.sessions:
@@ -352,8 +381,7 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
     ) -> tts_pb2.ListModelsResponse:
         """List available models.
 
-        Returns a list of all available TTS models. For the mock adapter,
-        this returns only the mock-440hz model.
+        Returns a list of all loaded models with their metadata.
 
         Args:
             request: ListModelsRequest (empty)
@@ -364,23 +392,37 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         """
         logger.debug("ListModels called")
 
-        model = tts_pb2.ModelInfo(
-            model_id="mock-440hz",
-            family="mock",
-            is_loaded=True,
-            languages=["en"],
-            metadata={"frequency": "440", "type": "sine_wave"},
-        )
+        try:
+            loaded_models = await self.model_manager.list_models()
+            model_info = await self.model_manager.get_model_info()
 
-        return tts_pb2.ListModelsResponse(models=[model])
+            models = []
+            for model_id in loaded_models:
+                info = model_info.get(model_id, {})
+                model = tts_pb2.ModelInfo(
+                    model_id=model_id,
+                    family="mock",  # M4: all models are mock, M5+ will have real families
+                    is_loaded=True,
+                    languages=["en"],
+                    metadata={
+                        "refcount": str(info.get("refcount", 0)),
+                        "idle_seconds": str(info.get("idle_seconds", 0)),
+                    },
+                )
+                models.append(model)
+
+            return tts_pb2.ListModelsResponse(models=models)
+
+        except Exception as e:
+            logger.error("Error listing models", extra={"error": str(e)})
+            return tts_pb2.ListModelsResponse(models=[])
 
     async def LoadModel(
         self, request: tts_pb2.LoadModelRequest, context: grpc.aio.ServicerContext
     ) -> tts_pb2.LoadModelResponse:
         """Load a model.
 
-        Dynamically loads a TTS model. For the mock adapter, this is a no-op
-        that always succeeds immediately.
+        Dynamically loads a TTS model via the ModelManager.
 
         Args:
             request: LoadModelRequest with model_id
@@ -392,20 +434,40 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         model_id = request.model_id
         logger.info("LoadModel called", extra={"model_id": model_id})
 
-        # Mock implementation - instant load
-        return tts_pb2.LoadModelResponse(
-            success=True,
-            message="Model loaded",
-            load_duration_ms=10,
-        )
+        try:
+            start_time = time.time()
+            await self.model_manager.load(model_id)
+            load_duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "Model loaded successfully",
+                extra={"model_id": model_id, "load_duration_ms": load_duration_ms},
+            )
+
+            return tts_pb2.LoadModelResponse(
+                success=True,
+                message="Model loaded",
+                load_duration_ms=load_duration_ms,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to load model",
+                extra={"model_id": model_id, "error": str(e)},
+            )
+            return tts_pb2.LoadModelResponse(
+                success=False,
+                message=f"Failed to load model: {e}",
+                load_duration_ms=0,
+            )
 
     async def UnloadModel(
         self, request: tts_pb2.UnloadModelRequest, context: grpc.aio.ServicerContext
     ) -> tts_pb2.UnloadModelResponse:
         """Unload a model.
 
-        Unloads a TTS model to free resources. For the mock adapter, this is
-        a no-op that always succeeds immediately.
+        Unloads a TTS model to free resources. The model will only be unloaded
+        if it's not currently in use (refcount == 0).
 
         Args:
             request: UnloadModelRequest with model_id
@@ -417,11 +479,28 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         model_id = request.model_id
         logger.info("UnloadModel called", extra={"model_id": model_id})
 
-        # Mock implementation - instant unload
-        return tts_pb2.UnloadModelResponse(
-            success=True,
-            message="Model unloaded",
-        )
+        try:
+            # Release model reference (this doesn't force unload, just decrements refcount)
+            # For force unload, we'd need to check refcount and call _unload_model directly
+            # For M4, we'll implement a simple release that respects refcounting
+            await self.model_manager.release(model_id)
+
+            logger.info("Model unload initiated", extra={"model_id": model_id})
+
+            return tts_pb2.UnloadModelResponse(
+                success=True,
+                message="Model unload initiated (will unload when idle)",
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to unload model",
+                extra={"model_id": model_id, "error": str(e)},
+            )
+            return tts_pb2.UnloadModelResponse(
+                success=False,
+                message=f"Failed to unload model: {e}",
+            )
 
     async def GetCapabilities(
         self, request: tts_pb2.GetCapabilitiesRequest, context: grpc.aio.ServicerContext
@@ -440,21 +519,57 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         """
         logger.debug("GetCapabilities called")
 
-        capabilities = tts_pb2.Capabilities(
-            streaming=True,
-            zero_shot=False,
-            lora=False,
-            cpu_ok=True,
-            languages=["en"],
-            emotive_zero_prompt=False,
-            max_concurrent_sessions=10,
-        )
+        try:
+            loaded_models = await self.model_manager.list_models()
 
-        return tts_pb2.GetCapabilitiesResponse(
-            capabilities=capabilities,
-            resident_models=["mock-440hz"],
-            metrics={"rtf": 0.1, "queue_depth": 0.0},
-        )
+            capabilities = tts_pb2.Capabilities(
+                streaming=True,
+                zero_shot=False,  # M4: mock adapter doesn't support zero-shot
+                lora=False,
+                cpu_ok=True,
+                languages=["en"],
+                emotive_zero_prompt=False,
+                max_concurrent_sessions=10,
+            )
+
+            return tts_pb2.GetCapabilitiesResponse(
+                capabilities=capabilities,
+                resident_models=loaded_models,
+                metrics={"rtf": 0.1, "queue_depth": float(len(self.sessions))},
+            )
+
+        except Exception as e:
+            logger.error("Error getting capabilities", extra={"error": str(e)})
+            # Return minimal capabilities on error
+            capabilities = tts_pb2.Capabilities(
+                streaming=True,
+                zero_shot=False,
+                lora=False,
+                cpu_ok=True,
+                languages=["en"],
+                emotive_zero_prompt=False,
+                max_concurrent_sessions=10,
+            )
+            return tts_pb2.GetCapabilitiesResponse(
+                capabilities=capabilities,
+                resident_models=[],
+                metrics={},
+            )
+
+
+def load_config(config_path: str = "configs/worker.yaml") -> dict[str, Any]:
+    """Load worker configuration from YAML file.
+
+    Args:
+        config_path: Path to configuration file
+
+    Returns:
+        Configuration dictionary
+    """
+    with open(config_path) as f:
+        result = yaml.safe_load(f)
+        assert isinstance(result, dict)
+        return result
 
 
 async def start_worker(config: dict[str, Any]) -> None:
@@ -471,11 +586,35 @@ async def start_worker(config: dict[str, Any]) -> None:
         - Listens on all interfaces ([::]:{port})
         - Graceful shutdown with 5 second timeout
     """
-    port = config.get("port", 7001)
+    # Extract configuration
+    worker_config = config.get("worker", {})
+    port = worker_config.get("grpc_port", 7001)
+
+    mm_config = config.get("model_manager", {})
+
+    # Create ModelManager
+    model_manager = ModelManager(
+        default_model_id=mm_config.get("default_model_id", "mock-440hz"),
+        preload_model_ids=mm_config.get("preload_model_ids", []),
+        ttl_ms=mm_config.get("ttl_ms", 600000),
+        min_residency_ms=mm_config.get("min_residency_ms", 120000),
+        resident_cap=mm_config.get("resident_cap", 3),
+        max_parallel_loads=mm_config.get("max_parallel_loads", 1),
+        warmup_enabled=mm_config.get("warmup_enabled", True),
+        warmup_text=mm_config.get("warmup_text", "This is a warmup test."),
+        evict_check_interval_ms=mm_config.get("evict_check_interval_ms", 30000),
+    )
+
+    # Initialize ModelManager (load default/preload models, start eviction)
+    try:
+        await model_manager.initialize()
+    except Exception as e:
+        logger.error("Failed to initialize ModelManager", extra={"error": str(e)})
+        raise
 
     # Create async gRPC server
     server = grpc.aio.server()
-    servicer = TTSWorkerServicer()
+    servicer = TTSWorkerServicer(model_manager)
     tts_pb2_grpc.add_TTSServiceServicer_to_server(servicer, server)  # type: ignore[no-untyped-call]
 
     listen_addr = f"[::]:{port}"
@@ -492,4 +631,5 @@ async def start_worker(config: dict[str, Any]) -> None:
     finally:
         logger.info("Stopping TTS worker")
         await server.stop(grace=5.0)
+        await model_manager.shutdown()
         logger.info("TTS worker stopped")
