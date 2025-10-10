@@ -3,70 +3,59 @@
 This module contains comprehensive integration tests for the TTS worker server
 and gRPC client. Tests cover session lifecycle, streaming synthesis, control
 commands, model management, and timing requirements.
+
+ARCHITECTURE NOTE:
+These tests validate the direct gRPC API of TTS workers, which remains unchanged
+in M2 architecture. While M2 introduces the orchestrator layer for client-facing
+interactions, workers still expose the same gRPC interface tested here.
+
+Test scope:
+- Direct worker gRPC API (bypasses orchestrator)
+- Session lifecycle (StartSession, EndSession)
+- Streaming synthesis (Synthesize RPC)
+- Control commands (PAUSE/RESUME/STOP)
+- Model management (ListModels, LoadModel, UnloadModel)
+- Performance metrics (frame timing, pause latency)
+
+For full system integration tests (client → orchestrator → worker), see:
+- test_full_pipeline.py
+- test_websocket_e2e.py
+
+GRPC SEGFAULT WORKAROUND:
+These tests use gRPC async stubs which may segfault in certain environments (WSL2).
+The tests will be skipped automatically in unsafe environments unless:
+- Running with `just test-integration` (uses --forked flag)
+- Setting GRPC_TESTS_ENABLED=1 environment variable
+
+See GRPC_SEGFAULT_WORKAROUND.md for details.
 """
 
 import asyncio
 import logging
-import subprocess
 import time
 from collections.abc import AsyncIterator
 
 import pytest
+import pytest_asyncio
 
 from src.orchestrator.grpc_client import TTSWorkerClient
 from src.rpc.generated import tts_pb2
+from tests.integration.test_utils import skip_if_grpc_unsafe
 
 logger = logging.getLogger(__name__)
 
-
-@pytest.fixture
-async def worker_process() -> AsyncIterator[subprocess.Popen[bytes]]:
-    """Start TTS worker in subprocess.
-
-    Starts the worker server in a subprocess and ensures it's running
-    before yielding to tests. Cleans up the process on teardown.
-
-    Yields:
-        subprocess.Popen: Worker process instance
-    """
-    # Start worker process
-    logger.info("Starting worker subprocess")
-    proc = subprocess.Popen(
-        ["uv", "run", "python", "-m", "src.tts.worker_main"],  # noqa: S607
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-    # Wait for worker to start (give it 2 seconds)
-    await asyncio.sleep(2.0)
-
-    # Check if still running
-    if proc.poll() is not None:
-        stdout, stderr = proc.communicate()
-        pytest.fail(
-            f"Worker failed to start\nstdout: {stdout.decode()}\nstderr: {stderr.decode()}"
-        )
-
-    logger.info(f"Worker started with PID {proc.pid}")
-
-    yield proc
-
-    # Cleanup
-    logger.info(f"Terminating worker PID {proc.pid}")
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        logger.warning("Worker did not terminate, killing")
-        proc.kill()
-        proc.wait()
-
-    logger.info("Worker subprocess terminated")
+# Apply gRPC safety check to all tests in this module
+pytestmark = [
+    skip_if_grpc_unsafe,
+    pytest.mark.integration,
+    pytest.mark.docker,
+    pytest.mark.grpc,
+]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(
-    worker_process: subprocess.Popen[bytes],
+    mock_tts_worker: str,
 ) -> AsyncIterator[TTSWorkerClient]:
     """Create and connect TTS worker client.
 
@@ -74,12 +63,12 @@ async def client(
     connection is established. Cleans up by disconnecting on teardown.
 
     Args:
-        worker_process: Worker subprocess fixture
+        mock_tts_worker: Mock worker address from conftest.py fixture
 
     Yields:
         TTSWorkerClient: Connected client instance
     """
-    client = TTSWorkerClient("localhost:7001")
+    client = TTSWorkerClient(mock_tts_worker)
     await client.connect()
 
     yield client
@@ -502,14 +491,14 @@ async def test_pause_response_timing(client: TTSWorkerClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_isolation(client: TTSWorkerClient) -> None:
+async def test_session_isolation(client: TTSWorkerClient, mock_tts_worker: str) -> None:
     """Test that sessions are isolated from each other.
 
     Verifies that operations on one session don't affect other sessions
     (requires creating a second client connection).
     """
     # Create second client
-    client2 = TTSWorkerClient("localhost:7001")
+    client2 = TTSWorkerClient(mock_tts_worker)
     await client2.connect()
 
     try:

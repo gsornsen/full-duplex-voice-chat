@@ -1,55 +1,42 @@
 # Orchestrator Configuration
+# M2: WebSocket + LiveKit transport, VAD stub, static routing
 
 transport:
-  # WebRTC configuration
-  webrtc:
-    enabled: true
-    port: 8080
-    ice_servers:
-      - urls: "stun:stun.l.google.com:19302"
-
-  # WebSocket fallback
   websocket:
     enabled: true
     host: "0.0.0.0"
-    port: 8081
+    port: 8080  # Valid range: 1024-65535
+    max_connections: 100  # Valid range: >= 1
+    frame_queue_size: 50  # Valid range: >= 10
 
-# Voice Activity Detection
+  livekit:
+    enabled: true  # Optional - system works without it
+    url: "http://localhost:7880"
+    api_key: "devkey"
+    api_secret: "devsecret1234567890abcdefghijklmn"
+    room_prefix: "tts-session"
+
+redis:
+  url: "redis://redis:6379"
+  db: 0  # Valid range: 0-15
+  worker_key_prefix: "worker:"
+  worker_ttl_seconds: 30  # Valid range: >= 5
+  connection_pool_size: 10  # Valid range: >= 1
+
+routing:
+  # M2: Static routing to single mock worker
+  static_worker_addr: "grpc://localhost:7001"
+
+  # M9+ (Future): Dynamic routing settings (not used in M2)
+  prefer_resident_models: true
+  load_balance_strategy: "queue_depth"
+
 vad:
   enabled: true
-  sample_rate: 48000
-  frame_duration_ms: 20
-  aggressiveness: 3  # 0-3, higher = more aggressive filtering
+  aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
+  sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
+  frame_duration_ms: 20  # Valid values: 10, 20, 30
 
-# Automatic Speech Recognition
-asr:
-  enabled: true
-  model: "small"  # tiny, base, small, medium, large
-  language: "en"
-  device: "cuda"  # cuda or cpu
-
-# Routing configuration
-routing:
-  strategy: "prefer-resident"  # prefer-resident, least-busy, random
-  fallback_on_unavailable: true
-  async_model_load: true
-  health_check_interval_ms: 5000
-
-# Redis service discovery
-redis:
-  url: "redis://localhost:6379"
-  worker_ttl_seconds: 30
-  heartbeat_interval_seconds: 10
-
-# Session management
-session:
-  max_concurrent: 10
-  idle_timeout_seconds: 300
-  barge_in_enabled: true
-  barge_in_debounce_ms: 100
-
-# Logging
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  format: "json"
-  redact_audio_paths: true
+# Operational settings
+log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+graceful_shutdown_timeout_s: 10  # Valid range: >= 1

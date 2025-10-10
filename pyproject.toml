@@ -3,7 +3,7 @@ name = "realtime-duplex-voice"
 version = "0.1.0"
 description = "Realtime duplex voice chat system with barge-in support"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiortc>=1.9.0",
     "websockets>=12.0",
@@ -14,6 +14,8 @@ dependencies = [
     "protobuf>=4.25.0",
     "redis>=5.0.0",
     "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "sounddevice>=0.4.6",
     "soundfile>=0.12.0",
     "webrtcvad>=2.0.0",
     "torch>=2.7.0",
@@ -25,11 +27,17 @@ dependencies = [
     "openai-whisper>=20240930",
     "watchfiles>=0.21.0",
     "pyyaml>=6.0.0",
+    "livekit-api>=0.6.0",
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-forked>=1.6.0",
+    "pytest-xdist>=3.5.0",
     "mypy>=1.9.0",
     "ruff>=0.3.0",
     "types-pyyaml>=6.0.0",
@@ -45,7 +53,7 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py312"
 exclude = ["src/rpc/generated"]
 
 [tool.ruff.lint]
@@ -53,10 +61,10 @@ select = ["E", "F", "I", "UP", "B", "S"]
 ignore = ["S101"]  # Allow assert in tests
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S105", "S106"]
+"tests/**/*.py" = ["S101", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 warn_return_any = true
@@ -71,10 +79,25 @@ exclude = ["src/rpc/generated"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-q"
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "-m", "not performance",
+]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (require Docker, Redis, etc.)",
+    "docker: Tests requiring Docker (may skip if unavailable)",
+    "redis: Tests requiring Redis container",
+    "livekit: Tests requiring LiveKit container",
+    "performance: Performance benchmark tests",
+    "slow: Tests that take longer to run (> 5s)",
+]
 
 [tool.anyio]
 backends = ["asyncio"]
@@ -82,4 +105,6 @@ backends = ["asyncio"]
 [dependency-groups]
 dev = [
     "pytest-asyncio>=1.2.0",
+    "pytest-forked>=1.6.0",
+    "pytest-xdist>=3.5.0",
 ]

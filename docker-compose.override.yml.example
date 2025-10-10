@@ -1,0 +1,38 @@
+# docker-compose.override.yml.example
+#
+# Optional overrides for local development and debugging.
+# Copy this file to docker-compose.override.yml to use.
+#
+# Docker Compose automatically merges docker-compose.override.yml
+# with docker-compose.yml when running docker compose commands.
+
+services:
+  # Uncomment to expose Redis on host port 6380 for debugging
+  # This is NOT needed for normal operation - services communicate internally
+  # redis:
+  #   ports:
+  #     - "6380:6379"
+
+  # Example: Override orchestrator log level for debugging
+  # orchestrator:
+  #   environment:
+  #     - LOG_LEVEL=DEBUG
+
+  # Example: Override TTS worker settings
+  # tts0:
+  #   environment:
+  #     - LOG_LEVEL=DEBUG
+  #     - WORKER_NAME=tts-worker-debug
+
+  # Example: Add a second TTS worker on GPU 1
+  # tts1:
+  #   extends:
+  #     service: tts0
+  #   container_name: tts-worker-1
+  #   ports:
+  #     - "7003:7001"  # Different host port
+  #     - "9091:9090"  # Different metrics port
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379
+  #     - CUDA_VISIBLE_DEVICES=1
+  #     - WORKER_NAME=tts-worker-1

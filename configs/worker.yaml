@@ -3,7 +3,7 @@
 worker:
   name: "tts-worker-0"
   grpc_host: "0.0.0.0"
-  grpc_port: 7002
+  grpc_port: 7001  # Valid range: 1024-65535
 
   # Worker capabilities
   capabilities:
@@ -13,9 +13,9 @@ worker:
     cpu_ok: false
     languages: ["en"]
     emotive_zero_prompt: true
-    max_concurrent_sessions: 3
+    max_concurrent_sessions: 3  # Valid range: >= 1
 
-# Model Manager configuration
+# Model Manager configuration (M4+ feature)
 model_manager:
   # Required default model (must exist)
   default_model_id: "cosyvoice2-en-base"
@@ -24,13 +24,13 @@ model_manager:
   preload_model_ids: []
 
   # Eviction policy
-  ttl_ms: 600000           # 10 minutes idle → unload
-  min_residency_ms: 120000  # Keep at least 2 minutes
-  evict_check_interval_ms: 30000  # Check every 30 seconds
+  ttl_ms: 600000           # 10 minutes idle → unload (Valid range: >= 0)
+  min_residency_ms: 120000  # Keep at least 2 minutes (Valid range: >= 0)
+  evict_check_interval_ms: 30000  # Check every 30 seconds (Valid range: >= 0)
 
   # Capacity limits
-  resident_cap: 3           # Max models in VRAM
-  max_parallel_loads: 1     # Prevent OOM from concurrent loads
+  resident_cap: 3           # Max models in VRAM (Valid range: >= 1)
+  max_parallel_loads: 1     # Prevent OOM from concurrent loads (Valid range: >= 1)
 
   # Warmup
   warmup_enabled: true
@@ -38,27 +38,27 @@ model_manager:
 
 # Audio processing
 audio:
-  output_sample_rate: 48000
-  frame_duration_ms: 20
-  loudness_target_lufs: -16.0
+  output_sample_rate: 48000  # Valid range: >= 8000
+  frame_duration_ms: 20      # Valid range: >= 10
+  loudness_target_lufs: -16.0  # Typical range: -23 to -16 LUFS
   normalization_enabled: true
 
-# Redis service discovery
+# Redis service discovery (M9+ feature)
 redis:
   url: "redis://localhost:6379"
-  registration_ttl_seconds: 30
-  heartbeat_interval_seconds: 10
+  registration_ttl_seconds: 30  # Valid range: >= 5
+  heartbeat_interval_seconds: 10  # Valid range: >= 1
 
-# Metrics
+# Metrics (Future feature)
 metrics:
   enabled: true
-  prometheus_port: 9090
+  prometheus_port: 9090  # Valid range: 1024-65535
   track_latency: true
   track_rtf: true
   track_queue_depth: true
 
 # Logging
 logging:
-  level: "INFO"
-  format: "json"
+  level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # Valid values: json, text
   include_session_id: true

@@ -198,9 +198,7 @@ class TTSWorkerClient:
 
         return bool(response.success)
 
-    async def synthesize(
-        self, text_chunks: list[str]
-    ) -> AsyncIterator[tts_pb2.AudioFrame]:
+    async def synthesize(self, text_chunks: list[str]) -> AsyncIterator[tts_pb2.AudioFrame]:
         """Synthesize text to audio frames.
 
         Sends text chunks to the worker and streams back 20ms audio frames at

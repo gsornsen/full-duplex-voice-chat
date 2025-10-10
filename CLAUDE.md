@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**Last Updated**: 2025-10-09
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -13,6 +15,9 @@ This is a **Realtime Duplex Voice Demo** system enabling low-latency speech↔sp
 - Dynamic model lifecycle: default preload, runtime load/unload, TTL-based eviction
 - Scale: single-GPU (two-process), multi-GPU (same host), multi-host (LAN)
 
+**Current Implementation Status**: Milestones M0-M2 complete (Enhanced), M3-M13 planned.
+See [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) for detailed status.
+
 ## Development Environment
 
 **Python & Tooling:**
@@ -25,6 +30,7 @@ This is a **Realtime Duplex Voice Demo** system enabling low-latency speech↔sp
 - CUDA Toolkit: 13.0.1 available, but pair **PyTorch 2.7.0** with **CUDA 12.8** prebuilt wheels for stability
 - Docker Engine 28.x with NVIDIA container runtime for GPU workers
 - Base container: `nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04`
+- **WSL2 Note**: gRPC tests require process isolation (see Testing Strategy section)
 
 **Dependencies:**
 Redis for worker service discovery and registry.
@@ -52,17 +58,18 @@ just gen-proto     # Generate gRPC stubs from src/rpc/tts.proto
 
 ### Runtime (Single-GPU)
 ```bash
-# Run TTS worker with Sesame adapter
-just run-tts-sesame DEFAULT="cosyvoice2-en-base" PRELOAD=""
-
-# Run TTS worker with CosyVoice adapter
-just run-tts-cosy DEFAULT="cosyvoice2-en-base" PRELOAD=""
+# Run TTS worker with mock adapter (M1/M2 - currently implemented)
+just run-tts-mock
 
 # Run orchestrator
 just run-orch
 
 # Run CLI client
 just cli HOST="ws://localhost:8080"
+
+# Note: Real TTS adapters below are M5-M8 milestones (not yet implemented)
+# just run-tts-sesame DEFAULT="cosyvoice2-en-base" PRELOAD=""
+# just run-tts-cosy DEFAULT="cosyvoice2-en-base" PRELOAD=""
 ```
 
 ### Profiling
@@ -78,32 +85,36 @@ just ncu-tts       # Nsight Compute kernel analysis
 
 ### Docker
 ```bash
-docker compose up --build    # Start full stack (redis + orchestrator + tts workers)
+docker compose up --build    # Start full stack (redis + livekit + caddy + orchestrator + tts workers)
 ```
 
 ## Architecture Overview
 
 **Two-tier streaming architecture:**
 
-1. **Orchestrator** (LiveKit agent or equivalent):
-   - WebRTC transport for browser clients, WS fallback for CLI
-   - VAD (Voice Activity Detection) for interruption detection
-   - ASR (Whisper small/distil) for speech-to-text
-   - Session management and state machine (LISTENING → SPEAKING → BARGED_IN)
-   - Routing logic: capability-aware, prefers resident models, Redis-based discovery
+1. **Orchestrator** (LiveKit-based):
+   - **Primary Transport**: LiveKit WebRTC for browser clients (full-duplex audio)
+   - **Secondary Transport**: WebSocket fallback for CLI testing and simple clients
+   - VAD (M3+): Voice Activity Detection for barge-in interruption (state machine ready, integration pending)
+   - ASR (M10+): Whisper small/distil for speech-to-text (planned)
+   - Session management and state machine (LISTENING → SPEAKING → BARGED_IN) ✅ Implemented
+   - Routing logic (M9+): capability-aware, prefers resident models, Redis-based discovery (static routing in M2)
    - Lives in `src/orchestrator/`
 
 2. **TTS Workers** (one per GPU/adapter):
-   - gRPC server implementing unified streaming ABI
-   - Model Manager: handles load/unload, TTL eviction, warmup, LRU caching
+   - gRPC server implementing unified streaming ABI ✅ Implemented (M1)
+   - Model Manager (M4+): handles load/unload, TTL eviction, warmup, LRU caching (planned)
    - Adapters: implement model-specific logic while conforming to shared interface
-   - Emit 20 ms, 48 kHz mono PCM frames
+   - Emit 20 ms, 48 kHz mono PCM frames ✅ Implemented
    - Lives in `src/tts/`
 
-**Key flow:**
+**Key flow (M10+ with ASR):**
 - Client speaks → Orchestrator (VAD + ASR) → (optional LLM) → TTS Worker → Audio frames → Client
 - Barge-in: VAD detects speech → sends PAUSE to worker (< 50 ms) → worker stops emitting frames
 - Resume: VAD detects silence → sends RESUME → worker continues
+
+**Current flow (M0-M2):**
+- Client sends text → Orchestrator → TTS Worker (mock) → Audio frames → Client
 
 ## Code Structure
 
@@ -111,25 +122,28 @@ docker compose up --build    # Start full stack (redis + orchestrator + tts work
 src/
 ├─ orchestrator/
 │  ├─ server.py          # LiveKit Agent + WS fallback, session management
-│  ├─ vad.py             # Voice Activity Detection
-│  ├─ asr.py             # Automatic Speech Recognition (Whisper)
-│  ├─ routing.py         # Worker selection logic (capability + load aware)
+│  ├─ livekit_utils/     # LiveKit integration (agent, transport)
+│  ├─ transport/         # WebSocket transport
+│  ├─ vad.py             # Voice Activity Detection (M3+)
+│  ├─ asr.py             # Automatic Speech Recognition (M10+)
+│  ├─ routing.py         # Worker selection logic (M9+ capability-aware)
 │  ├─ registry.py        # Redis-based worker discovery
 │  └─ config.py          # Configuration loading
 │
 ├─ tts/
 │  ├─ worker.py          # gRPC server, adapter host, ModelManager integration
-│  ├─ model_manager.py   # Model lifecycle: load/unload, TTL eviction, warmup, LRU
+│  ├─ model_manager.py   # Model lifecycle (M4+): load/unload, TTL eviction, warmup, LRU
 │  ├─ tts_base.py        # Protocol/interface for all adapters
 │  ├─ adapters/          # Model-specific implementations
-│  │  ├─ adapter_sesame.py
-│  │  ├─ adapter_unsloth_sesame.py    # LoRA variant
-│  │  ├─ adapter_xtts.py
-│  │  ├─ adapter_cosyvoice2.py
-│  │  └─ adapter_piper.py             # CPU-only baseline
+│  │  ├─ adapter_mock.py           # M1/M2 - Mock adapter (sine wave) ✅ Implemented
+│  │  ├─ adapter_piper.py          # M5 - CPU-only baseline (planned)
+│  │  ├─ adapter_cosyvoice2.py     # M6 - GPU expressive (planned)
+│  │  ├─ adapter_xtts.py           # M7 - GPU cloning (planned)
+│  │  ├─ adapter_sesame.py         # M8 - Sesame base (planned)
+│  │  └─ adapter_unsloth_sesame.py # M8 - LoRA variant (planned)
 │  ├─ audio/
 │  │  ├─ framing.py      # 20ms framing, resample to 48kHz
-│  │  └─ loudness.py     # RMS/LUFS normalization
+│  │  └─ loudness.py     # RMS/LUFS normalization (M6+)
 │  └─ utils/
 │     ├─ logging.py
 │     └─ timers.py
@@ -148,11 +162,11 @@ src/
 All TTS adapters implement the same gRPC interface defined in `src/rpc/tts.proto`:
 
 **Core streaming:**
-- `StartSession` / `EndSession`: session lifecycle
-- `Synthesize(stream TextChunk) → stream AudioFrame`: main streaming path
-- `Control(PAUSE|RESUME|STOP|RELOAD)`: runtime control
+- `StartSession` / `EndSession`: session lifecycle ✅ Implemented
+- `Synthesize(stream TextChunk) → stream AudioFrame`: main streaming path ✅ Implemented
+- `Control(PAUSE|RESUME|STOP|RELOAD)`: runtime control ✅ Implemented
 
-**Model lifecycle:**
+**Model lifecycle (M4+):**
 - `ListModels`: query available models
 - `LoadModel(model_id)`: dynamically load a model
 - `UnloadModel(model_id)`: unload when idle
@@ -162,9 +176,9 @@ All TTS adapters implement the same gRPC interface defined in `src/rpc/tts.proto
 - Output: 20 ms frames, 48 kHz, mono PCM (Opus optional later)
 - Adapters must repacketize internal chunk sizes to 20 ms
 
-## Model Manager
+## Model Manager (M4+)
 
-`src/tts/model_manager.py` handles all model lifecycle:
+`src/tts/model_manager.py` handles all model lifecycle (planned for M4 milestone):
 
 **Startup behavior:**
 - Load **default_model_id** (required, must exist)
@@ -189,7 +203,7 @@ model_manager:
   max_parallel_loads: 1
 ```
 
-## Voice Packs
+## Voice Packs (M5-M8)
 
 Models are stored in `voicepacks/<family>/<model_id>/`:
 ```
@@ -205,7 +219,7 @@ voicepacks/
    └─ ref/seed.wav          # optional reference audio for cloning
 ```
 
-## Routing & Worker Discovery
+## Routing & Worker Discovery (M9+)
 
 Workers announce capabilities to Redis:
 ```json
@@ -225,11 +239,13 @@ Workers announce capabilities to Redis:
 }
 ```
 
-**Selection logic:**
+**Selection logic (M9+):**
 1. Filter by language, capabilities, and sample rate
 2. **Prefer resident models** (already loaded in VRAM)
 3. Pick lowest queue_depth, then best p50 latency
 4. If requested model not resident, optionally trigger async LoadModel and route to fallback
+
+**Current (M2):** Static worker address configuration for testing.
 
 ## Performance Targets
 
@@ -247,20 +263,27 @@ Workers announce capabilities to Redis:
 
 The project follows a phased implementation plan (see `project_documentation/INCREMENTAL_IMPLEMENTATION_PLAN.md`):
 
-1. **M0**: Repo scaffold + CI skeleton
-2. **M1**: gRPC ABI + Mock worker
-3. **M2**: Orchestrator transport + WS fallback
-4. **M3**: Barge-in end-to-end
-5. **M4**: Model Manager v1 (default/preload/TTL)
-6. **M5**: Piper adapter (CPU baseline)
-7. **M6**: CosyVoice 2 adapter (GPU)
-8. **M7**: XTTS-v2 adapter (GPU + cloning)
-9. **M8**: Sesame / Unsloth (+LoRA) adapter
-10. **M9**: Routing v1 (capabilities + prefer resident)
-11. **M10**: ASR integration; full speech↔speech
-12. **M11**: Observability & profiling
-13. **M12**: Docker/Compose smoke; docs polish
-14. **M13**: Multi-GPU & multi-host scale-out
+1. **M0**: ✅ Repo scaffold + CI skeleton (Complete)
+2. **M1**: ✅ gRPC ABI + Mock worker (Complete - 16/16 tests passing)
+3. **M2**: ✅ Orchestrator transport + WS fallback (Enhanced - LiveKit WebRTC primary, exceeds original scope)
+4. **M3**: 🔄 Barge-in end-to-end (Partial - state machine complete, VAD integration pending)
+5. **M4**: 📝 Model Manager v1 (default/preload/TTL) - Planned
+6. **M5**: 📝 Piper adapter (CPU baseline) - Planned
+7. **M6**: 📝 CosyVoice 2 adapter (GPU) - Planned
+8. **M7**: 📝 XTTS-v2 adapter (GPU + cloning) - Planned
+9. **M8**: 📝 Sesame / Unsloth (+LoRA) adapter - Planned
+10. **M9**: 📝 Routing v1 (capabilities + prefer resident) - Planned
+11. **M10**: 📝 ASR integration; full speech↔speech - Planned
+12. **M11**: 📝 Observability & profiling - Planned
+13. **M12**: 📝 Docker/Compose smoke; docs polish - Planned
+14. **M13**: 📝 Multi-GPU & multi-host scale-out - Planned
+
+**Legend**:
+- ✅ Complete: Fully implemented and tested
+- 🔄 Partial: Some implementation, needs completion
+- 📝 Planned: Not yet started
+
+**Note**: M2 exceeded original scope - LiveKit was implemented as PRIMARY transport (not just fallback), with comprehensive WebRTC support, Caddy reverse proxy, and TLS infrastructure.
 
 ## Important Patterns
 
@@ -287,20 +310,29 @@ The project follows a phased implementation plan (see `project_documentation/INC
 ## Testing Strategy
 
 **Unit tests (`tests/unit/`):**
-- VAD edge detection
-- Routing policy logic
+- VAD edge detection (M3+)
+- Routing policy logic (M9+)
 - TTS control semantics (PAUSE/RESUME/STOP)
-- Model manager lifecycle (load/unload/TTL/evict/LRU)
+- Model manager lifecycle (M4+): load/unload/TTL/evict/LRU
 - Audio framing (exact 20 ms cadence, 48 kHz)
 
 **Integration tests (`tests/integration/`):**
+- M1 Worker Integration: 16/16 tests passing with `--forked` mode
+- Full pipeline WebSocket tests: 6/8 passing (2 timeout - under investigation)
 - Loopback WebSocket test (FAL + frame timing)
-- Barge-in timing validation (< 50 ms)
-- Preload defaults honored
+- Barge-in timing validation (< 50 ms) - M3+
+- Preload defaults honored - M4+
 
 **CI (`just ci`):**
 - Runs ruff + mypy + pytest on all PRs
 - GPU integration tests can be tagged/skipped on non-GPU runners
+
+**gRPC Testing in WSL2:**
+- **Issue**: grpc-python has segfault issues in WSL2 during test teardown
+- **Solution**: Use `just test-integration` which runs tests with `--forked` flag (process isolation)
+- **Documentation**: See [GRPC_SEGFAULT_WORKAROUND.md](GRPC_SEGFAULT_WORKAROUND.md) for details
+- **Status**: 100% mitigated with pytest-forked, tests reliable
+- **Alternative**: Skip gRPC tests in WSL2 (automatic detection), run in Docker or native Linux
 
 ## Docker & Deployment
 
@@ -311,17 +343,19 @@ docker compose up --build
 
 This starts:
 - Redis (service discovery)
+- LiveKit (WebRTC server)
+- Caddy (HTTPS reverse proxy for WebRTC)
 - Orchestrator (WebRTC/WS server)
-- TTS worker (pinned to GPU 0)
+- TTS worker (mock adapter, pinned to GPU 0)
 
 **Multi-GPU (same host):**
 ```bash
-CUDA_VISIBLE_DEVICES=0 just run-tts-cosy
-CUDA_VISIBLE_DEVICES=1 just run-tts-xtts
+CUDA_VISIBLE_DEVICES=0 just run-tts-mock  # Worker 0
+CUDA_VISIBLE_DEVICES=1 just run-tts-mock  # Worker 1 (when available)
 just run-orch
 ```
 
-**Multi-host (LAN):**
+**Multi-host (LAN) - M13:**
 - Run central Redis instance
 - Workers announce with host:port reachable on LAN
 - Orchestrator discovers via Redis
@@ -355,3 +389,8 @@ Full documentation in `project_documentation/`:
 - `TDD.md`: Detailed technical design (v2.1)
 - `INCREMENTAL_IMPLEMENTATION_PLAN.md`: Milestone breakdown
 - `IMPLEMENTATION_MILESTONES_AND_TASKS_CHECKLIST.md`: Task checklists
+
+Additional documentation:
+- [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md): Current implementation status
+- [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md): Testing strategy and commands
+- [GRPC_SEGFAULT_WORKAROUND.md](GRPC_SEGFAULT_WORKAROUND.md): WSL2 gRPC testing workaround

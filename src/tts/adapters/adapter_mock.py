@@ -119,9 +119,7 @@ class MockTTSAdapter:
 
                     yield frame
 
-            logger.info(
-                "Synthesis stream completed", extra={"total_chunks": chunk_count}
-            )
+            logger.info("Synthesis stream completed", extra={"total_chunks": chunk_count})
 
         finally:
             async with self.lock:

@@ -18,6 +18,53 @@ from src.tts.adapters.adapter_mock import MockTTSAdapter
 logger = logging.getLogger(__name__)
 
 
+def validate_audio_frame(frame: tts_pb2.AudioFrame) -> bool:
+    """Validate audio frame format according to protocol specification.
+
+    Validates frame according to the rules defined in tts.proto:
+    - Empty frame with is_final=False is INVALID (protocol error)
+    - Empty frame with is_final=True is VALID (End Marker)
+    - Non-empty frame with any is_final value is VALID
+
+    Args:
+        frame: AudioFrame to validate
+
+    Returns:
+        True if frame is valid, False if invalid
+
+    Notes:
+        Logs warning for invalid frames with diagnostic information.
+        Expected frame size is 1920 bytes for 20ms @ 48kHz mono 16-bit PCM.
+    """
+    # Empty frame without final marker is invalid
+    if len(frame.audio_data) == 0 and not frame.is_final:
+        logger.warning(
+            "Invalid frame: empty audio_data without is_final marker",
+            extra={
+                "session_id": frame.session_id,
+                "sequence_number": frame.sequence_number,
+            },
+        )
+        return False
+
+    # Non-empty frame should have expected size (1920 bytes for 20ms@48kHz)
+    if len(frame.audio_data) > 0:
+        expected_size = frame.sample_rate * frame.frame_duration_ms // 1000 * 2
+        if len(frame.audio_data) != expected_size:
+            logger.warning(
+                "Frame size mismatch (may be valid for some codecs)",
+                extra={
+                    "session_id": frame.session_id,
+                    "sequence_number": frame.sequence_number,
+                    "expected_bytes": expected_size,
+                    "actual_bytes": len(frame.audio_data),
+                },
+            )
+            # Don't fail - partial frames might be valid for some codecs
+
+    return True
+
+
 class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
     """gRPC servicer for TTS worker.
 
@@ -117,6 +164,12 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         Main streaming synthesis endpoint. Receives text chunks from the client,
         passes them to the adapter, and streams back 20ms audio frames at 48kHz.
 
+        Protocol Implementation:
+        - Uses FINAL DATA FRAME pattern (Option A from tts.proto)
+        - Marks the last data frame with is_final=True
+        - Does NOT send separate empty end marker
+        - All frames have non-empty audio_data
+
         Args:
             request_iterator: Async iterator of TextChunk messages
             context: gRPC service context
@@ -127,7 +180,7 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         Notes:
             - First chunk must contain session_id
             - Adapter must output 20ms frames at 48kHz
-            - Final frame has is_final=True and empty audio_data
+            - Last frame has is_final=True with audio data (Final Data Frame)
         """
         session_id: str | None = None
         sequence_number = 0
@@ -167,11 +220,17 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
                 async for chunk in request_iterator:
                     yield chunk.text
 
-            # Stream audio frames from adapter
-            frame_count = 0
+            # Collect all frames to identify the last one (Final Data Frame pattern)
+            frames_list: list[bytes] = []
             async for audio_data in adapter.synthesize_stream(text_generator()):
+                frames_list.append(audio_data)
+
+            # Yield frames, marking the last one as final (Option A: Final Data Frame)
+            frame_count = 0
+            for idx, audio_data in enumerate(frames_list):
                 sequence_number += 1
                 frame_count += 1
+                is_last = idx == len(frames_list) - 1
 
                 frame = tts_pb2.AudioFrame(
                     session_id=session_id,
@@ -179,20 +238,18 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
                     sample_rate=48000,
                     frame_duration_ms=20,
                     sequence_number=sequence_number,
-                    is_final=False,
+                    is_final=is_last,  # Mark last frame as final
                 )
-                yield frame
 
-            # Send final frame marker
-            sequence_number += 1
-            yield tts_pb2.AudioFrame(
-                session_id=session_id,
-                audio_data=b"",
-                sample_rate=48000,
-                frame_duration_ms=20,
-                sequence_number=sequence_number,
-                is_final=True,
-            )
+                # Validate frame before sending
+                if not validate_audio_frame(frame):
+                    logger.error(
+                        "Generated invalid frame, skipping",
+                        extra={"session_id": session_id, "seq": sequence_number},
+                    )
+                    continue
+
+                yield frame
 
             logger.info(
                 "Synthesis stream completed",

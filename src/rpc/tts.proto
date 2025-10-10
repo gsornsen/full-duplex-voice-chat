@@ -49,13 +49,61 @@ message TextChunk {
   int64 sequence_number = 4;
 }
 
+// AudioFrame represents a 20ms chunk of PCM audio at 48kHz.
+//
+// Frame Types and Protocol Semantics:
+//
+// 1. DATA FRAME:
+//    - is_final: false
+//    - audio_data: Non-empty (1920 bytes for 20ms @ 48kHz mono, 16-bit PCM)
+//    - Purpose: Regular audio chunk during synthesis
+//
+// 2. FINAL DATA FRAME (Recommended):
+//    - is_final: true
+//    - audio_data: Non-empty (1920 bytes)
+//    - Purpose: Last audio chunk with data, marks completion of synthesis
+//
+// 3. END MARKER (Backward Compatibility):
+//    - is_final: true
+//    - audio_data: Empty (0 bytes)
+//    - Purpose: Pure signaling frame to mark end of synthesis
+//
+// Protocol Rules:
+// - Workers MUST send at least one frame with is_final=true per synthesis
+// - Workers SHOULD use Final Data Frame pattern (fewer frames, better efficiency)
+// - Workers MAY use separate End Marker pattern (easier debugging, backward compat)
+// - Orchestrators MUST NOT forward frames with empty audio_data to clients
+// - Orchestrators MUST exit synthesis loop when is_final=true is received
+// - Orchestrators MUST handle both Final Data Frame and End Marker patterns
+//
+// Validation Rules:
+// - Frame with is_final=false and empty audio_data: INVALID (protocol error)
+// - Frame with is_final=true and empty audio_data: Valid (End Marker, skip forwarding)
+// - Frame with is_final=true and non-empty audio_data: Valid (Final Data Frame, forward)
+// - Frame with is_final=false and non-empty audio_data: Valid (Data Frame, forward)
+//
+// Example Sequences:
+//
+// Option A (Final Data Frame - Recommended):
+//   Frame 1: audio_data=[1920 bytes], is_final=false, seq=1
+//   Frame 2: audio_data=[1920 bytes], is_final=false, seq=2
+//   Frame 3: audio_data=[1920 bytes], is_final=true, seq=3  <- Final data frame
+//   Result: 3 frames forwarded to client
+//
+// Option B (Separate End Marker - Backward Compatible):
+//   Frame 1: audio_data=[1920 bytes], is_final=false, seq=1
+//   Frame 2: audio_data=[1920 bytes], is_final=false, seq=2
+//   Frame 3: audio_data=[1920 bytes], is_final=false, seq=3
+//   Frame 4: audio_data=[0 bytes], is_final=true, seq=4     <- End marker (not forwarded)
+//   Result: 3 frames forwarded to client
+//
 message AudioFrame {
   string session_id = 1;
-  bytes audio_data = 2;
-  int32 sample_rate = 3;
-  int32 frame_duration_ms = 4;
-  int64 sequence_number = 5;
-  bool is_final = 6;
+  bytes audio_data = 2;           // PCM audio data (empty for End Marker)
+  int32 sample_rate = 3;          // Sample rate in Hz (48000)
+  int32 frame_duration_ms = 4;    // Frame duration in milliseconds (20)
+  int64 sequence_number = 5;      // Monotonic sequence number (1, 2, 3, ...)
+  bool is_final = 6;              // True for final frame or end marker
 }
 
 // Control messages
