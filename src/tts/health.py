@@ -104,9 +104,7 @@ class HealthServicer:
 
         return HealthCheckResponse(status=status)
 
-    async def Watch(
-        self, request: HealthCheckRequest, context: grpc.aio.ServicerContext
-    ) -> None:
+    async def Watch(self, request: HealthCheckRequest, context: grpc.aio.ServicerContext) -> None:
         """Watch service health (streaming).
 
         Not implemented for M2 (optional in gRPC health protocol).
@@ -124,9 +122,7 @@ class HealthServicer:
         )
 
 
-def add_health_servicer_to_server(
-    servicer: HealthServicer, server: grpc.aio.Server
-) -> None:
+def add_health_servicer_to_server(servicer: HealthServicer, server: grpc.aio.Server) -> None:
     """Register health servicer with gRPC server.
 
     For M2: Manual registration without generated proto.

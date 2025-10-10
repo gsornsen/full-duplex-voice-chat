@@ -23,13 +23,24 @@ typecheck:
 test:
     uv run pytest tests/ -v -m "not performance and not docker"
 
-# Run integration tests (requires Docker services to be running)
+# Run integration tests with process isolation (requires Docker services)
 test-integration:
     #!/usr/bin/env bash
     set -e
     echo "Note: Integration tests require Docker services to be running."
     echo "Start services with: docker compose up -d"
     echo ""
+    echo "Running integration tests with --forked flag for process isolation..."
+    GRPC_TESTS_FORKED=1 uv run pytest tests/integration/ --forked -v -m "integration"
+
+# Run integration tests without process isolation (faster but may segfault)
+test-integration-fast:
+    #!/usr/bin/env bash
+    set -e
+    echo "Note: Integration tests require Docker services to be running."
+    echo "Start services with: docker compose up -d"
+    echo ""
+    echo "Running integration tests without process isolation (may segfault)..."
     uv run pytest tests/integration/ -v -m "integration"
 
 # Run performance benchmarks with process isolation (requires Docker services)
@@ -40,7 +51,7 @@ test-performance:
     echo "Start services with: docker compose up -d"
     echo ""
     echo "Running performance tests with --forked flag for process isolation..."
-    uv run pytest tests/performance/test_performance.py --forked -v -m performance
+    GRPC_TESTS_FORKED=1 uv run pytest tests/performance/test_performance.py --forked -v -m performance
 
 # Run all checks (lint + typecheck + test) - excludes Docker-dependent tests
 ci: lint typecheck test
@@ -88,7 +99,9 @@ run-tts-cosy DEFAULT="cosyvoice2-en-base":
 run-tts-mock:
     uv run python -m src.tts.worker \
         --adapter mock \
-        --default-model mock-440hz
+        --default-model mock-440hz \
+        --host localhost \
+        --port 7001
 
 # Run orchestrator
 run-orch:
@@ -103,106 +116,16 @@ cli HOST="ws://localhost:8080":
 
 # CPU profiling with py-spy (top view)
 spy-top PID:
-    py-spy top --pid {{PID}}
+    sudo py-spy top --pid {{PID}}
 
 # CPU profiling with py-spy (record flamegraph)
 spy-record PID OUT="profile.svg":
-    py-spy record --pid {{PID}} --output {{OUT}}
+    sudo py-spy record -o {{OUT}} --pid {{PID}}
 
 # GPU profiling with Nsight Systems
 nsys-tts:
-    nsys profile -o tts-trace \
-        --trace=cuda,nvtx,osrt \
-        uv run python -m src.tts.worker --config configs/worker.yaml
+    nsys profile -o tts_profile uv run python -m src.tts.worker --adapter mock
 
 # GPU profiling with Nsight Compute
 ncu-tts:
-    ncu --set full \
-        --export tts-kernels \
-        uv run python -m src.tts.worker --config configs/worker.yaml
-
-# Docker
-# ------
-
-# Build all Docker images
-docker-build:
-    docker compose build
-
-# Start full stack (redis + orchestrator + tts workers)
-docker-up:
-    docker compose up --build
-
-# Stop all services
-docker-down:
-    docker compose down
-
-# View all logs
-docker-logs:
-    docker compose logs -f
-
-# View specific service logs
-docker-logs-service SERVICE:
-    docker compose logs -f {{SERVICE}}
-
-# HTTPS Setup for Local Network Access
-# -------------------------------------
-
-# Update Caddyfile and .env.local with current host IP
-update-ip IP="":
-    #!/usr/bin/env bash
-    if [[ -z "{{IP}}" ]]; then
-        ./scripts/update-ip.sh
-    else
-        ./scripts/update-ip.sh --ip {{IP}}
-    fi
-
-# Show current IP address
-show-ip:
-    @hostname -I | awk '{print $1}'
-
-# Restart Caddy to apply configuration changes
-caddy-restart:
-    docker compose restart caddy
-
-# View Caddy logs
-caddy-logs:
-    docker compose logs -f caddy
-
-# Test HTTPS setup (requires services to be running)
-test-https:
-    #!/usr/bin/env bash
-    IP=$(hostname -I | awk '{print $1}')
-    echo "Testing HTTPS endpoints..."
-    echo ""
-    echo "1. Testing web client (HTTPS):"
-    curl -k -I "https://$IP" || echo "Failed to connect to web client"
-    echo ""
-    echo "2. Testing LiveKit (WSS):"
-    curl -k -I "https://$IP:7443" || echo "Failed to connect to LiveKit"
-    echo ""
-    echo "Access URLs:"
-    echo "  Web Client: https://$IP"
-    echo "  LiveKit WSS: wss://$IP:7443"
-
-# Development
-# -----------
-
-# Install dependencies
-install:
-    uv sync --all-extras
-
-# Lock dependencies
-lock:
-    uv lock
-
-# Clean generated files
-clean:
-    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-    find . -type f -name "*.pyc" -delete 2>/dev/null || true
-    find . -type f -name "*.pyo" -delete 2>/dev/null || true
-    rm -rf src/rpc/generated/*.py src/rpc/generated/*.pyi 2>/dev/null || true
-    rm -rf .pytest_cache .mypy_cache .ruff_cache 2>/dev/null || true
-
-# Format code
-format:
-    uv run ruff format src/ tests/
+    ncu --set full -o tts_kernels uv run python -m src.tts.worker --adapter mock

@@ -15,9 +15,7 @@ class WebSocketConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable WebSocket transport")
     host: str = Field(default="0.0.0.0", description="Bind host address")  # noqa: S104
     port: int = Field(default=8080, ge=1024, le=65535, description="Bind port")
-    max_connections: int = Field(
-        default=100, ge=1, description="Maximum concurrent connections"
-    )
+    max_connections: int = Field(default=100, ge=1, description="Maximum concurrent connections")
     frame_queue_size: int = Field(
         default=50, ge=10, description="Audio frame buffer size per session"
     )
@@ -26,9 +24,7 @@ class WebSocketConfig(BaseModel):
 class LiveKitConfig(BaseModel):
     """LiveKit/WebRTC transport configuration."""
 
-    enabled: bool = Field(
-        default=False, description="Enable LiveKit transport (optional for M2)"
-    )
+    enabled: bool = Field(default=False, description="Enable LiveKit transport (optional for M2)")
     url: str = Field(
         default="http://localhost:7880",
         description="LiveKit server URL",
@@ -118,9 +114,7 @@ class VADConfig(BaseModel):
         """Validate that sample rate is supported by webrtcvad."""
         valid_rates = [8000, 16000, 32000, 48000]
         if v not in valid_rates:
-            raise ValueError(
-                f"VAD sample_rate must be one of {valid_rates}, got {v}"
-            )
+            raise ValueError(f"VAD sample_rate must be one of {valid_rates}, got {v}")
         return v
 
     @field_validator("frame_duration_ms")
@@ -129,9 +123,7 @@ class VADConfig(BaseModel):
         """Validate that frame duration is supported by webrtcvad."""
         valid_durations = [10, 20, 30]
         if v not in valid_durations:
-            raise ValueError(
-                f"VAD frame_duration_ms must be one of {valid_durations}, got {v}"
-            )
+            raise ValueError(f"VAD frame_duration_ms must be one of {valid_durations}, got {v}")
         return v
 
 

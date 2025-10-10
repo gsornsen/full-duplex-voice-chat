@@ -4,7 +4,7 @@ Tests configuration loading, validation, and defaults.
 """
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -121,7 +121,7 @@ def test_orchestrator_config_defaults() -> None:
 
 
 @patch("os.getenv")
-def test_orchestrator_config_from_yaml(mock_getenv, tmp_path: Path) -> None:
+def test_orchestrator_config_from_yaml(mock_getenv: Mock, tmp_path: Path) -> None:
     """Test loading configuration from YAML file."""
     # Mock os.getenv to return None (no environment overrides)
     mock_getenv.return_value = None
@@ -162,10 +162,10 @@ log_level: "DEBUG"
 
 
 @patch("os.getenv")
-def test_orchestrator_config_from_yaml_with_env_overrides(mock_getenv, tmp_path: Path) -> None:
+def test_orchestrator_config_from_yaml_with_env_overrides(mock_getenv: Mock, tmp_path: Path) -> None: # noqa: E501
     """Test loading configuration from YAML file with environment variable overrides."""
     # Mock os.getenv to return override URL for REDIS_URL
-    def getenv_side_effect(key):
+    def getenv_side_effect(key: str) -> str | None:
         if key == "REDIS_URL":
             return "redis://patched_host:6379"
         return None

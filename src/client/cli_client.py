@@ -55,6 +55,7 @@ class AudioPlayer:
         self.sd = None
         try:
             import sounddevice as sd
+
             self.sd = sd
             logger.info(f"Audio output initialized (device: {device or 'default'})")
         except ImportError:
@@ -160,9 +161,7 @@ class CLIClient:
         await websocket.send(message.model_dump_json())
         logger.debug(f"Sent: {text}")
 
-    async def send_control(
-        self, websocket: ClientConnection, command: str
-    ) -> None:
+    async def send_control(self, websocket: ClientConnection, command: str) -> None:
         """Send control message to server.
 
         Args:

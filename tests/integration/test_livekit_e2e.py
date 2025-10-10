@@ -13,6 +13,9 @@ Tests LiveKit transport flow:
 Note: These tests require LiveKit server running. They will be skipped if:
 - Docker is not available
 - LiveKit container fails to start
+
+IMPORTANT: These tests are isolated due to grpc-python event loop issues.
+Run separately with: pytest tests/integration/test_livekit_e2e.py --forked
 """
 
 import logging
@@ -33,10 +36,15 @@ async def test_livekit_server_available(livekit_container: str) -> None:
     """
     import aiohttp
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{livekit_container}/") as resp:
-            assert resp.status < 500, f"LiveKit server returned {resp.status}"
-            logger.info(f"LiveKit server accessible at {livekit_container}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{livekit_container}/", timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                assert resp.status < 500, f"LiveKit server returned {resp.status}"
+                logger.info(f"LiveKit server accessible at {livekit_container}")
+    except Exception as e:
+        pytest.fail(f"Failed to connect to LiveKit server: {e}")
 
 
 @pytest.mark.integration

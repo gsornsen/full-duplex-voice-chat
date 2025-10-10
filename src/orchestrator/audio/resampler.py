@@ -51,8 +51,7 @@ class AudioResampler:
         """
         if source_rate <= 0 or target_rate <= 0:
             raise ValueError(
-                f"Sample rates must be positive: "
-                f"source={source_rate}, target={target_rate}"
+                f"Sample rates must be positive: source={source_rate}, target={target_rate}"
             )
 
         self._source_rate = source_rate
@@ -60,8 +59,7 @@ class AudioResampler:
         self._ratio = target_rate / source_rate
 
         logger.info(
-            f"Resampler initialized: {source_rate}Hz → {target_rate}Hz "
-            f"(ratio={self._ratio:.4f})"
+            f"Resampler initialized: {source_rate}Hz → {target_rate}Hz (ratio={self._ratio:.4f})"
         )
 
     def process_frame(self, frame: bytes) -> bytes:
@@ -78,8 +76,7 @@ class AudioResampler:
         """
         if len(frame) % 2 != 0:
             raise ValueError(
-                f"Frame size must be a multiple of 2 bytes (16-bit samples), "
-                f"got {len(frame)} bytes"
+                f"Frame size must be a multiple of 2 bytes (16-bit samples), got {len(frame)} bytes"
             )
 
         # Convert bytes to numpy array
@@ -104,9 +101,7 @@ class AudioResampler:
             ValueError: If input size is invalid
         """
         if input_size_bytes % 2 != 0:
-            raise ValueError(
-                f"Input size must be a multiple of 2 bytes, got {input_size_bytes}"
-            )
+            raise ValueError(f"Input size must be a multiple of 2 bytes, got {input_size_bytes}")
 
         input_samples = input_size_bytes // 2
         output_samples = int(input_samples * self._ratio)
@@ -163,8 +158,7 @@ class AudioResampler:
         # Resample using scipy (FFT-based method)
         # scipy.signal.resample returns ndarray with Any dtype, so we cast it
         resampled_float: NDArray[Any] = cast(
-            NDArray[Any],
-            signal.resample(audio_float, output_length)
+            NDArray[Any], signal.resample(audio_float, output_length)
         )
 
         # Clip to int16 range and convert back

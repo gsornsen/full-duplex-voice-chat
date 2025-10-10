@@ -268,8 +268,10 @@ class WebSocketTransport(Transport):
     """
 
     def __init__(
-        self, host: str = "0.0.0.0",  # noqa: S104
-        port: int = 8080, max_connections: int = 100
+        self,
+        host: str = "0.0.0.0",  # noqa: S104
+        port: int = 8080,
+        max_connections: int = 100,
     ) -> None:
         """Initialize WebSocket transport.
 
@@ -313,9 +315,7 @@ class WebSocketTransport(Transport):
         if self._running:
             raise RuntimeError("WebSocket transport is already running")
 
-        logger.info(
-            "Starting WebSocket server", extra={"host": self._host, "port": self._port}
-        )
+        logger.info("Starting WebSocket server", extra={"host": self._host, "port": self._port})
 
         try:
             self._server = await websockets.serve(

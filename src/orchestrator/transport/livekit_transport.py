@@ -7,7 +7,7 @@ with audio track publishing and data channel for text messaging.
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import numpy as np
 from livekit import rtc
@@ -79,10 +79,7 @@ class LiveKitSession(TransportSession):
     @property
     def is_connected(self) -> bool:
         """Check if the session connection is still active."""
-        return (
-            self._connected
-            and self._room.connection_state == rtc.ConnectionState.CONN_CONNECTED
-        )
+        return self._connected and self._room.connection_state == rtc.ConnectionState.CONN_CONNECTED
 
     async def initialize_audio_track(self) -> None:
         """Initialize audio source and track for publishing.
@@ -263,9 +260,7 @@ class LiveKitSession(TransportSession):
         try:
             # Unpublish audio track
             if self._audio_track is not None:
-                await self._room.local_participant.unpublish_track(
-                    self._audio_track.sid
-                )
+                await self._room.local_participant.unpublish_track(self._audio_track.sid)
 
             # Disconnect from room
             await self._room.disconnect()
@@ -303,9 +298,9 @@ class LiveKitTransport(Transport):
         # Active rooms and sessions
         self._active_rooms: dict[str, rtc.Room] = {}
         self._active_sessions: dict[str, LiveKitSession] = {}
-        
+
         # Room monitoring
-        self._monitor_task: asyncio.Task | None = None
+        self._monitor_task: asyncio.Task[None] | None = None
         self._monitored_rooms: set[str] = set()
 
         logger.info(
@@ -432,108 +427,112 @@ class LiveKitTransport(Transport):
 
     async def _monitor_rooms(self) -> None:
         """Monitor for new rooms and join them as an agent.
-        
+
         Continuously polls for new rooms and joins them as an agent when
         participants are present.
         """
         logger.info("Starting room monitoring")
-        
+
         while self._running:
             try:
                 # List all active rooms
                 rooms = await self._room_manager.list_rooms()
                 logger.info(f"Found {len(rooms)} rooms during monitoring")
-                
+
                 for room in rooms:
                     room_name = room.name
-                    logger.info(f"Checking room: {room_name}, participants: {room.num_participants}")
-                    
+                    logger.info(
+                        f"Checking room: {room_name}, participants: {room.num_participants}"
+                    )
+
                     # Skip if we're already monitoring this room
                     if room_name in self._monitored_rooms:
                         logger.info(f"Already monitoring room: {room_name}")
                         continue
-                    
+
                     # Skip if room has no participants (except our agent)
                     if room.num_participants == 0:
                         logger.info(f"Room {room_name} has no participants, skipping")
                         continue
-                    
+
                     # Check if room matches our prefix pattern
                     if not room_name.startswith(self._config.room_prefix):
-                        logger.info(f"Room {room_name} doesn't match prefix {self._config.room_prefix}")
+                        logger.info(
+                            f"Room {room_name} doesn't match prefix {self._config.room_prefix}"
+                        )
                         continue
-                    
+
                     logger.info(
                         "Found new room with participants",
-                        extra={"room": room_name, "participants": room.num_participants}
+                        extra={"room": room_name, "participants": room.num_participants},
                     )
-                    
+
                     # Mark as monitored
                     self._monitored_rooms.add(room_name)
-                    
+
                     # Join room as agent
                     asyncio.create_task(self._join_room_as_agent(room_name))
-                
+
                 # Wait before next poll
                 await asyncio.sleep(2.0)
-                
+
             except asyncio.CancelledError:
                 logger.info("Room monitoring cancelled")
                 break
             except Exception as e:
                 logger.error("Error in room monitoring", extra={"error": str(e)})
                 await asyncio.sleep(5.0)  # Wait longer on error
-        
+
         logger.info("Room monitoring stopped")
 
     async def _join_room_as_agent(self, room_name: str) -> None:
         """Join a room as an agent and wait for participants.
-        
+
         Args:
             room_name: Name of the room to join
         """
         try:
             logger.info("Joining room as agent", extra={"room": room_name})
-            
+
             # Create room instance
             room = rtc.Room()
-            
+
             # Set up event handlers BEFORE connecting
             participant_event = asyncio.Event()
             participants: list[rtc.RemoteParticipant] = []
-            
+
             def on_participant_connected(participant: rtc.RemoteParticipant) -> None:
                 if participant.identity != "agent":  # Don't count our own agent
                     participants.append(participant)
                     participant_event.set()
                     logger.info(
                         "Participant joined room",
-                        extra={"room": room_name, "participant": participant.identity}
+                        extra={"room": room_name, "participant": participant.identity},
                     )
-            
+
             # Set up event handler BEFORE connecting
             room.on("participant_connected", on_participant_connected)
-            
+
             # Generate agent token
             agent_token = self._room_manager.create_access_token(
-                room_name=room_name,
-                participant_identity="agent",
-                ttl_hours=1
+                room_name=room_name, participant_identity="agent", ttl_hours=1
             )
-            
+
             # Connect to room
             await room.connect(self._config.url, agent_token)
             logger.info("Agent connected to room", extra={"room": room_name})
-            
+
             # Store active room
             self._active_rooms[room_name] = room
-            
+
             # Check if there are already participants in the room
-            existing_participants = [p for p in room.remote_participants.values() if p.identity != "agent"]
+            existing_participants = [
+                p for p in room.remote_participants.values() if p.identity != "agent"
+            ]
             if existing_participants:
                 logger.info(
                     "Found existing participants in room",
-                    extra={"room": room_name, "count": len(existing_participants)}
+                    extra={"room": room_name, "count": len(existing_participants)},
                 )
                 participants.extend(existing_participants)
                 participant_event.set()
@@ -542,35 +541,41 @@ class LiveKitTransport(Transport):
                 try:
                     await asyncio.wait_for(participant_event.wait(), timeout=30.0)
                 except TimeoutError:
-                    logger.warning("No participants joined room within timeout", extra={"room": room_name})
+                    logger.warning(
+                        "No participants joined room within timeout", extra={"room": room_name}
+                    )
                     await room.disconnect()
                     return
-            
+
             # Create session for each participant
             for participant in participants:
                 session_id = f"lk-{uuid.uuid4().hex[:12]}"
                 session = LiveKitSession(room, participant, session_id, room_name)
-                
+
                 # Set up data channel handler
-                def make_data_handler(sess, part):
-                    return lambda data, p: sess.on_data_received(data, p) if p.identity == part.identity else None
-                
+                def make_data_handler(sess: LiveKitSession, part: rtc.RemoteParticipant) -> Callable[[bytes, rtc.RemoteParticipant], None]: # noqa: E501
+                    return (
+                        lambda data, p: sess.on_data_received(data, p)
+                        if p.identity == part.identity
+                        else None
+                    )
+
                 room.on("data_received", make_data_handler(session, participant))
-                
+
                 # Initialize audio track
                 await session.initialize_audio_track()
-                
+
                 # Store session
                 self._active_sessions[session_id] = session
-                
+
                 # Queue session for accept_session()
                 await self._session_queue.put(session)
-                
+
                 logger.info(
                     "Created session for participant",
-                    extra={"session_id": session_id, "participant": participant.identity}
+                    extra={"session_id": session_id, "participant": participant.identity},
                 )
-            
+
         except Exception as e:
             logger.error("Error joining room as agent", extra={"room": room_name, "error": str(e)})
             logger.exception("Full exception details for room join error")
@@ -659,9 +664,9 @@ class LiveKitTransport(Transport):
             session = LiveKitSession(room, first_participant, session_id, room_name)
 
             # Set up data channel handler
-            def make_data_handler(sess):
+            def make_data_handler(sess: LiveKitSession) -> Callable[[bytes, rtc.RemoteParticipant], None]: # noqa: E501
                 return lambda data, participant: sess.on_data_received(data, participant)
-            
+
             room.on("data_received", make_data_handler(session))
 
             # Initialize audio track

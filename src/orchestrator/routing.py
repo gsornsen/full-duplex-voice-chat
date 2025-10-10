@@ -95,9 +95,7 @@ class Router:
             workers = await self.registry.get_workers()
 
             if not workers:
-                error_msg = (
-                    "No workers available in registry and no static worker configured"
-                )
+                error_msg = "No workers available in registry and no static worker configured"
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
@@ -107,10 +105,7 @@ class Router:
             # for the initial implementation where we assume all workers are
             # compatible and capable of handling any request.
             selected = workers[0]
-            logger.info(
-                f"Selected worker '{selected.name}' at {selected.addr} "
-                f"(dynamic discovery)"
-            )
+            logger.info(f"Selected worker '{selected.name}' at {selected.addr} (dynamic discovery)")
             return selected.addr
 
         except ConnectionError as e:
@@ -119,18 +114,14 @@ class Router:
             # we cannot proceed. This is a hard failure that requires operator
             # intervention (either fix Redis or configure static worker).
             if not self.static_worker_addr:
-                error_msg = (
-                    f"Redis unavailable and no static worker configured: {e}"
-                )
+                error_msg = f"Redis unavailable and no static worker configured: {e}"
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
 
             # Fall back to static worker if Redis is unavailable
             # This provides resilience in case Redis fails temporarily.
             # The static worker acts as a reliable fallback path.
-            logger.warning(
-                f"Redis unavailable, using static worker fallback: {e}"
-            )
+            logger.warning(f"Redis unavailable, using static worker fallback: {e}")
             return self.static_worker_addr
 
     async def select_worker_dynamic(
@@ -172,11 +163,7 @@ class Router:
         # supports other languages like Chinese ("zh"). This allows multi-language
         # workers to serve requests for any of their supported languages.
         if language:
-            workers = [
-                w
-                for w in workers
-                if language in w.capabilities.get("languages", [])
-            ]
+            workers = [w for w in workers if language in w.capabilities.get("languages", [])]
             if not workers:
                 # No workers support this language - hard failure
                 # This prevents routing requests to incompatible workers
@@ -190,9 +177,7 @@ class Router:
         if capabilities:
             workers = self._filter_by_capabilities(workers, capabilities)
             if not workers:
-                raise RuntimeError(
-                    f"No workers match required capabilities: {capabilities}"
-                )
+                raise RuntimeError(f"No workers match required capabilities: {capabilities}")
 
         # STEP 3: Prefer workers with resident model
         # Model residency optimization: If a specific model is requested and
@@ -209,9 +194,7 @@ class Router:
             if resident_workers:
                 # Found workers with resident model - use them exclusively
                 workers = resident_workers
-                logger.debug(
-                    f"Filtered to {len(workers)} workers with resident model '{model_id}'"
-                )
+                logger.debug(f"Filtered to {len(workers)} workers with resident model '{model_id}'")
             # else: No workers have model resident - continue with all workers
 
         # STEP 4: Apply load balancing strategy
@@ -307,9 +290,7 @@ class Router:
 
         return filtered
 
-    def _apply_load_balancing(
-        self, workers: list[WorkerRegistration]
-    ) -> WorkerRegistration:
+    def _apply_load_balancing(self, workers: list[WorkerRegistration]) -> WorkerRegistration:
         """Apply load balancing strategy to select worker.
 
         Load Balancing Strategies:
@@ -392,8 +373,7 @@ class Router:
             # This prevents crashes from configuration errors while still
             # allowing requests to be processed
             logger.warning(
-                f"Unknown load balance strategy '{self.load_balance_strategy}', "
-                f"using first worker"
+                f"Unknown load balance strategy '{self.load_balance_strategy}', using first worker"
             )
             return workers[0]
 

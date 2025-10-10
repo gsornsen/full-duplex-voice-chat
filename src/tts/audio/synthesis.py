@@ -53,9 +53,7 @@ def generate_sine_wave(frequency: int, duration_ms: int, sample_rate: int) -> by
     if frequency <= 0:
         raise ValueError(f"Frequency must be positive, got {frequency}")
     if frequency > sample_rate / 2:
-        raise ValueError(
-            f"Frequency {frequency} exceeds Nyquist limit {sample_rate / 2}"
-        )
+        raise ValueError(f"Frequency {frequency} exceeds Nyquist limit {sample_rate / 2}")
     if duration_ms < 0:
         raise ValueError(f"Duration must be non-negative, got {duration_ms}")
 

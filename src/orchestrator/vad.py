@@ -175,9 +175,7 @@ class VADProcessor:
                     self._speech_start_time_ms = self._current_time_ms
                 else:
                     # Check if we've accumulated enough speech
-                    speech_duration = (
-                        self._current_time_ms - self._speech_start_time_ms
-                    )
+                    speech_duration = self._current_time_ms - self._speech_start_time_ms
                     if speech_duration >= self._min_speech_duration_ms:
                         # Confirmed speech start
                         self._is_speaking = True
@@ -217,9 +215,7 @@ class VADProcessor:
         Returns:
             Expected frame size based on sample rate and frame duration
         """
-        samples_per_frame = (
-            self._config.sample_rate * self._config.frame_duration_ms // 1000
-        )
+        samples_per_frame = self._config.sample_rate * self._config.frame_duration_ms // 1000
         bytes_per_sample = 2  # 16-bit PCM
         return samples_per_frame * bytes_per_sample
 

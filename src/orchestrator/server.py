@@ -13,7 +13,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-# from aiohttp import web
+import grpc
 from aiohttp.web import Application, AppRunner, TCPSite
 
 from src.orchestrator.config import OrchestratorConfig
@@ -22,18 +22,46 @@ from src.orchestrator.health import setup_health_routes
 from src.orchestrator.registry import WorkerRegistry
 from src.orchestrator.session import SessionManager, SessionState
 from src.orchestrator.transport.websocket_transport import WebSocketTransport
+from src.rpc.generated import tts_pb2
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_session(
-    session_manager: SessionManager, worker_client: TTSWorkerClient
-) -> None:
+def _validate_audio_frame(frame: tts_pb2.AudioFrame) -> bool:
+    """Validate audio frame from worker.
+
+    Validates frame according to protocol specification in tts.proto:
+    - Empty frame with is_final=False is INVALID (protocol error)
+    - Empty frame with is_final=True is VALID (End Marker)
+    - Non-empty frame with any is_final value is VALID
+
+    Args:
+        frame: AudioFrame to validate
+
+    Returns:
+        True if frame is valid, False if invalid
+    """
+    # Empty frame without final marker is invalid
+    if len(frame.audio_data) == 0 and not frame.is_final:
+        return False
+
+    # All other cases are valid (will be handled appropriately)
+    return True
+
+
+async def handle_session(session_manager: SessionManager, worker_client: TTSWorkerClient) -> None:
     """Handle a single client session.
 
     Processes text input from the session, forwards it to the TTS worker,
     and streams audio back to the client. Handles session lifecycle and
     error cases.
+
+    Protocol Handling:
+    - Supports both Final Data Frame and End Marker patterns
+    - Skips empty frames (End Markers) without forwarding to client
+    - Detects is_final=True to complete synthesis loop
+    - Returns to LISTENING state after each synthesis for next message
+    - Supports multiple messages per session
 
     Args:
         session_manager: Manager for this session
@@ -42,7 +70,8 @@ async def handle_session(
     Notes:
         This coroutine runs for the duration of the session, from client
         connection through to disconnect or error. It maintains the session
-        state machine (LISTENING → SPEAKING) and coordinates with the worker.
+        state machine (LISTENING → SPEAKING → LISTENING) and coordinates
+        with the worker.
     """
     session_id = session_manager.session_id
 
@@ -58,10 +87,21 @@ async def handle_session(
         )
 
         # Main session loop: consume text input, stream audio output
+        # Supports multiple messages per session
         while True:
             # Wait for text input
             logger.debug("Waiting for text input", extra={"session_id": session_id})
-            text = await session_manager.transport.receive_text().__anext__()
+
+            try:
+                text = await session_manager.transport.receive_text().__anext__()
+            except StopAsyncIteration:
+                # Client closed text stream
+                logger.info("Client closed text stream", extra={"session_id": session_id})
+                break
+            except ConnectionError:
+                # Transport connection lost
+                logger.info("Transport connection lost", extra={"session_id": session_id})
+                break
 
             if text is None:
                 logger.info("Client disconnected (no text)", extra={"session_id": session_id})
@@ -82,30 +122,72 @@ async def handle_session(
             # Transition to SPEAKING state
             session_manager.state = SessionState.SPEAKING
 
-            # Stream synthesis
-            frame_count = 0
-            async for audio_frame in worker_client.synthesize([text]):
-                frame_count += 1
+            try:
+                # Stream synthesis
+                frame_count = 0
+                async for audio_frame in worker_client.synthesize([text]):
+                    # Validate frame
+                    if not _validate_audio_frame(audio_frame):
+                        logger.warning(
+                            "Skipping invalid frame (empty without is_final)",
+                            extra={
+                                "session_id": session_id,
+                                "sequence_number": audio_frame.sequence_number,
+                            },
+                        )
+                        continue
 
-                # Send audio to client
-                await session_manager.transport.send_audio_frame(audio_frame.audio_data)
+                    # Skip empty frames (End Markers) - don't send to client
+                    if len(audio_frame.audio_data) == 0:
+                        if audio_frame.is_final:
+                            logger.debug(
+                                "Received end marker (empty final frame), completing synthesis",
+                                extra={"session_id": session_id},
+                            )
+                            break
+                        else:
+                            # Invalid: empty frame without final marker (already logged warning)
+                            continue
 
-                if audio_frame.is_final:
-                    logger.debug(
-                        "Final audio frame sent",
-                        extra={
-                            "session_id": session_id,
-                            "total_frames": frame_count,
-                        },
-                    )
-                    break
+                    # Send non-empty audio to client
+                    frame_count += 1
+                    await session_manager.transport.send_audio_frame(audio_frame.audio_data)
 
-            # Return to LISTENING state
-            session_manager.state = SessionState.LISTENING
-            logger.info(
-                "Synthesis complete",
-                extra={"session_id": session_id, "frames_sent": frame_count},
-            )
+                    # Check if this is the final data frame
+                    if audio_frame.is_final:
+                        logger.debug(
+                            "Received final data frame, completing synthesis",
+                            extra={
+                                "session_id": session_id,
+                                "total_frames": frame_count,
+                            },
+                        )
+                        break
+
+                # Return to LISTENING state (session continues for next message)
+                session_manager.state = SessionState.LISTENING
+                logger.info(
+                    "Synthesis complete, ready for next message",
+                    extra={"session_id": session_id, "frames_sent": frame_count},
+                )
+
+            except grpc.RpcError as e:
+                logger.error(
+                    "gRPC error during synthesis",
+                    extra={"session_id": session_id, "error": str(e)},
+                )
+                # Don't break session - return to LISTENING for retry
+                session_manager.state = SessionState.LISTENING
+                continue
+            except Exception as e:
+                logger.exception(
+                    "Unexpected error during synthesis",
+                    extra={"session_id": session_id, "error": str(e)},
+                )
+                # Break session on unexpected errors
+                break
+
+            # Loop continues for next message...
 
     except asyncio.CancelledError:
         logger.info("Session handler cancelled", extra={"session_id": session_id})
@@ -179,18 +261,18 @@ async def start_server(config_path: Path) -> None:
 
     # Initialize LiveKit transport if enabled
     livekit_transport = None
-    logger.info("LiveKit config check", extra={
-        "enabled": config.transport.livekit.enabled,
-        "url": config.transport.livekit.url
-    })
+    logger.info(
+        "LiveKit config check",
+        extra={"enabled": config.transport.livekit.enabled, "url": config.transport.livekit.url},
+    )
     if config.transport.livekit.enabled:
         try:
             from src.orchestrator.transport.livekit_transport import LiveKitTransport
-            
+
             lk_config = config.transport.livekit
             logger.info("Initializing LiveKit transport", extra={"url": lk_config.url})
             livekit_transport = LiveKitTransport(lk_config)
-            
+
             await livekit_transport.start()
             logger.info("LiveKit transport started", extra={"url": lk_config.url})
         except Exception as e:
@@ -244,12 +326,12 @@ async def start_server(config_path: Path) -> None:
     session_tasks = []
     try:
         logger.info("Orchestrator server ready")
-        
+
         # Create tasks for both transports
         transport_tasks = []
-        
+
         # WebSocket transport task
-        async def websocket_loop():
+        async def websocket_loop() -> None:
             while True:
                 session = await transport.accept_session()
                 logger.info(
@@ -259,12 +341,13 @@ async def start_server(config_path: Path) -> None:
                 session_manager = SessionManager(session)
                 task = asyncio.create_task(handle_session(session_manager, worker_client))
                 session_tasks.append(task)
-        
+
         transport_tasks.append(asyncio.create_task(websocket_loop()))
-        
+
         # LiveKit transport task (if enabled)
         if livekit_transport:
-            async def livekit_loop():
+
+            async def livekit_loop() -> None:
                 while True:
                     session = await livekit_transport.accept_session()
                     logger.info(
@@ -274,9 +357,9 @@ async def start_server(config_path: Path) -> None:
                     session_manager = SessionManager(session)
                     task = asyncio.create_task(handle_session(session_manager, worker_client))
                     session_tasks.append(task)
-            
+
             transport_tasks.append(asyncio.create_task(livekit_loop()))
-        
+
         # Wait for any transport task to complete (they should run forever)
         await asyncio.gather(*transport_tasks)
 
@@ -292,7 +375,7 @@ async def start_server(config_path: Path) -> None:
         # Stop transports
         await transport.stop()
         logger.info("WebSocket transport stopped")
-        
+
         if livekit_transport:
             await livekit_transport.stop()
             logger.info("LiveKit transport stopped")
@@ -310,9 +393,7 @@ async def start_server(config_path: Path) -> None:
 
         # Wait for session tasks to complete
         if session_tasks:
-            logger.info(
-                "Waiting for sessions to complete", extra={"count": len(session_tasks)}
-            )
+            logger.info("Waiting for sessions to complete", extra={"count": len(session_tasks)})
             await asyncio.gather(*session_tasks, return_exceptions=True)
 
         logger.info("Orchestrator server stopped")

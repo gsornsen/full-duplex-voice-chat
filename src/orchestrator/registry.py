@@ -205,8 +205,7 @@ class WorkerRegistry:
             # Store with TTL
             await self._redis.setex(key, ttl, registration.to_json())
             logger.debug(
-                f"Registered worker '{registration.name}' at {registration.addr} "
-                f"(ttl={ttl}s)"
+                f"Registered worker '{registration.name}' at {registration.addr} (ttl={ttl}s)"
             )
         except Exception as e:
             logger.error(f"Failed to register worker '{registration.name}': {e}")

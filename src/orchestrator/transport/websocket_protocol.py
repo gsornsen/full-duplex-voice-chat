@@ -63,9 +63,7 @@ class ControlMessage(BaseModel):
     """
 
     type: Literal["control"] = "control"
-    command: Literal["PAUSE", "RESUME", "STOP"] = Field(
-        ..., description="Control command"
-    )
+    command: Literal["PAUSE", "RESUME", "STOP"] = Field(..., description="Control command")
 
 
 class ErrorMessage(BaseModel):
@@ -80,9 +78,7 @@ class ErrorMessage(BaseModel):
 
 
 # Union type for all server → client messages
-ServerMessage = (
-    AudioMessage | SessionStartMessage | SessionEndMessage | ErrorMessage
-)
+ServerMessage = AudioMessage | SessionStartMessage | SessionEndMessage | ErrorMessage
 
 # Union type for all client → server messages
 ClientMessage = TextMessage | ControlMessage

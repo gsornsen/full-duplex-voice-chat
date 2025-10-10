@@ -20,6 +20,14 @@ Test scope:
 For full system integration tests (client → orchestrator → worker), see:
 - test_full_pipeline.py
 - test_websocket_e2e.py
+
+GRPC SEGFAULT WORKAROUND:
+These tests use gRPC async stubs which may segfault in certain environments (WSL2).
+The tests will be skipped automatically in unsafe environments unless:
+- Running with `just test-integration` (uses --forked flag)
+- Setting GRPC_TESTS_ENABLED=1 environment variable
+
+See GRPC_SEGFAULT_WORKAROUND.md for details.
 """
 
 import asyncio
@@ -32,8 +40,16 @@ import pytest_asyncio
 
 from src.orchestrator.grpc_client import TTSWorkerClient
 from src.rpc.generated import tts_pb2
+from tests.integration.test_utils import skip_if_grpc_unsafe
 
 logger = logging.getLogger(__name__)
+
+# Apply gRPC safety check to all tests in this module
+pytestmark = [
+    skip_if_grpc_unsafe,
+    pytest.mark.integration,
+    pytest.mark.docker,
+]
 
 
 @pytest_asyncio.fixture

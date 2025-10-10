@@ -5,7 +5,6 @@ objects to verify session lifecycle, audio frame handling, and text reception.
 """
 
 import asyncio
-from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -169,10 +168,10 @@ class TestLiveKitSession:
     async def test_send_audio_frame_success(self, livekit_session: LiveKitSession) -> None:
         """Test sending valid audio frame."""
         with (
-            patch("src.orchestrator.transport.livekit_transport.rtc.AudioFrame") as mock_frame_class,
+            patch("src.orchestrator.transport.livekit_transport.rtc.AudioFrame") as mock_frame_class, # noqa: E501
             patch("src.orchestrator.transport.livekit_transport.np.frombuffer") as mock_frombuffer,
             patch("src.orchestrator.transport.livekit_transport.np.copyto"),
-            patch("src.orchestrator.transport.livekit_transport.np.asarray") as mock_asarray,
+            patch("src.orchestrator.transport.livekit_transport.np.asarray"),
         ):
             # Setup mocks
             mock_audio_source = AsyncMock()

@@ -16,6 +16,7 @@ This guide helps contributors run tests, write new tests, and understand the tes
 ## Table of Contents
 
 - [Running Tests](#running-tests)
+- [gRPC Segfault Workaround](#grpc-segfault-workaround)
 - [Test Markers](#test-markers)
 - [Writing Tests](#writing-tests)
 - [Test Fixtures](#test-fixtures)
@@ -45,8 +46,8 @@ pytest -vv
 # Unit tests only (fast, no Docker)
 pytest tests/unit/
 
-# Integration tests (requires Docker)
-pytest tests/integration/
+# Integration tests (requires Docker) - RECOMMENDED WITH --forked
+just test-integration
 
 # Specific test file
 pytest tests/unit/test_vad.py
@@ -73,8 +74,8 @@ pytest --cov=src --cov-report=html tests/
 # Run only unit tests
 pytest -m unit
 
-# Run only integration tests
-pytest -m integration
+# Run only integration tests (WITH PROCESS ISOLATION)
+just test-integration
 
 # Skip slow tests
 pytest -m "not slow"
@@ -91,6 +92,153 @@ pytest --lf
 # Run tests matching pattern
 pytest -k "test_speech"
 ```
+
+---
+
+## gRPC Segfault Workaround
+
+### Problem
+
+Integration tests using gRPC may encounter segmentation faults during test teardown due to grpc-python's background threads accessing garbage-collected event loops. This is a known upstream issue.
+
+**Upstream Issue:** https://github.com/grpc/grpc/issues/37714
+
+### Two Solutions Available
+
+#### 1. Automatic Environment-Based Skipping (Default)
+
+Tests that use gRPC will automatically skip in unsafe environments (WSL2) unless explicitly enabled:
+
+```bash
+# WSL2 environment - tests skip automatically with informative message
+pytest tests/integration/test_m1_worker_integration.py -v
+
+# Output:
+# SKIPPED - gRPC tests segfault in WSL2 environment. Options:
+#   (1) Run with GRPC_TESTS_ENABLED=1 to force enable (risky)
+#   (2) Use 'just test-integration' with --forked flag
+#   (3) Run in native Linux/macOS environment
+#   (4) Use Docker to run tests
+```
+
+**Force enable in unsafe environments:**
+```bash
+# WARNING: May segfault, but you asked for it
+GRPC_TESTS_ENABLED=1 pytest tests/integration/ -v
+```
+
+**Force disable everywhere:**
+```bash
+# Skip gRPC tests even in safe environments
+GRPC_TESTS_ENABLED=0 pytest tests/integration/ -v
+```
+
+#### 2. Process Isolation (Recommended for CI/CD)
+
+Use the `--forked` flag to run each test in a separate process, isolating segfaults:
+
+```bash
+# RECOMMENDED: Use justfile command (sets GRPC_TESTS_FORKED=1)
+just test-integration
+
+# Manual invocation
+uv run pytest tests/integration/ --forked -v
+
+# Specific test file with isolation
+uv run pytest tests/integration/test_full_pipeline.py --forked -v
+```
+
+### How It Works
+
+**Environment Detection:**
+- Automatically detects WSL2 by checking `/proc/version`
+- Tests skip in WSL2 unless `GRPC_TESTS_ENABLED=1` or `GRPC_TESTS_FORKED=1`
+- Tests run normally in native Linux, macOS, or Docker
+
+**Process Isolation (--forked):**
+1. Forks a new process for each test
+2. Runs the test in isolated process
+3. Collects results and returns to parent
+4. Terminates forked process, containing any segfaults
+
+Even if cleanup segfaults, the test result is captured and other tests continue.
+
+### Current Status
+
+**M1 Integration Tests (test_m1_worker_integration.py)**
+- ✅ 16/16 tests PASS without segfaults using `--forked`
+- ⏭️ Tests skip automatically in WSL2
+
+**Full Pipeline Tests (test_full_pipeline.py)**
+- ✅ 7/8 tests safe (no direct gRPC usage)
+- ⚠️ 1/8 test uses gRPC directly (test_component_integration_health_checks)
+  - Skips automatically in WSL2
+  - Runs with `--forked` or in safe environments
+
+### Usage Examples
+
+**Development in WSL2:**
+```bash
+# Tests skip automatically - no segfaults
+pytest tests/integration/ -v
+
+# Use process isolation to run anyway
+just test-integration
+```
+
+**Development in Native Linux/macOS:**
+```bash
+# Tests run normally
+pytest tests/integration/ -v
+
+# Or use process isolation for extra safety
+just test-integration
+```
+
+**CI/CD (GitHub Actions, etc.):**
+```bash
+# Always use process isolation for reliability
+just test-integration
+```
+
+### Environment Diagnostics
+
+To check if your environment is considered safe for gRPC tests:
+
+```bash
+# Run diagnostics
+uv run python -m tests.integration.test_utils
+
+# Output shows:
+# - Platform detection
+# - WSL2 status
+# - Environment variables
+# - Whether tests will run or skip
+```
+
+### Fast Mode (No Isolation, No Skip Detection)
+
+For development iteration when you know it's safe:
+```bash
+# Force enable + no process isolation (fastest, riskiest)
+GRPC_TESTS_ENABLED=1 pytest tests/integration/ -v
+
+# Or use the justfile shortcut (no fork)
+just test-integration-fast
+```
+
+### Detailed Documentation
+
+See [GRPC_SEGFAULT_WORKAROUND.md](/home/gerald/git/full-duplex-voice-chat/GRPC_SEGFAULT_WORKAROUND.md) for:
+- Detailed problem analysis
+- Implementation details
+- Troubleshooting guide
+- Future resolution path
+
+See [tests/integration/test_utils.py](/home/gerald/git/full-duplex-voice-chat/tests/integration/test_utils.py) for:
+- Environment detection source code
+- Skip marker implementation
+- Diagnostic functions
 
 ---
 
@@ -177,6 +325,7 @@ pytest -m unit
 - May require Redis container
 - Tests component interactions
 - Run in 1-10 seconds each
+- **MUST run with --forked flag** to avoid segfaults
 
 **Example:**
 ```python
@@ -197,7 +346,7 @@ async def test_worker_registration(redis_container):
 
 **Run integration tests:**
 ```bash
-pytest -m integration
+just test-integration  # RECOMMENDED (uses --forked)
 ```
 
 ---
@@ -943,8 +1092,8 @@ jobs:
       - name: Run type checking
         run: uv run mypy src
 
-      - name: Run tests
-        run: uv run pytest --cov=src --cov-report=xml tests/
+      - name: Run tests with process isolation
+        run: uv run pytest tests/integration/ --forked -v -m integration
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -1022,11 +1171,28 @@ pytest tests/
 
 ---
 
+### gRPC Segfault Issues
+
+**Symptom:** `Fatal Python error: Segmentation fault` during test teardown
+
+**Solution:** Use process isolation with --forked flag:
+```bash
+just test-integration
+# Or
+uv run pytest tests/integration/ --forked -v
+```
+
+See [gRPC Segfault Workaround](#grpc-segfault-workaround) section above for details.
+
+---
+
 ## Further Reading
 
 - [pytest Documentation](https://docs.pytest.org/)
 - [pytest-asyncio Plugin](https://pytest-asyncio.readthedocs.io/)
 - [pytest-cov Plugin](https://pytest-cov.readthedocs.io/)
+- [pytest-forked Plugin](https://github.com/pytest-dev/pytest-forked)
 - [unittest.mock Documentation](https://docs.python.org/3/library/unittest.mock.html)
 - [Quick Start Guide](QUICKSTART.md) - Running the system for testing
 - [Architecture](architecture/ARCHITECTURE.md) - Understanding components
+- [gRPC Segfault Workaround](../GRPC_SEGFAULT_WORKAROUND.md) - Detailed segfault fix documentation

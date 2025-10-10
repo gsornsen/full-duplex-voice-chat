@@ -6,6 +6,7 @@ the underlying transport mechanism.
 """
 
 import asyncio
+import logging
 import math
 import time
 from collections import deque
@@ -14,15 +15,47 @@ from enum import Enum
 
 from src.orchestrator.transport.base import TransportSession
 
+logger = logging.getLogger(__name__)
+
 
 class SessionState(Enum):
-    """Session state machine states."""
+    """Session state machine states.
 
-    IDLE = "idle"  # Initial state, no activity
-    LISTENING = "listening"  # Waiting for user speech
-    SPEAKING = "speaking"  # Playing TTS audio
-    BARGED_IN = "barged_in"  # User interrupted during playback (M3)
-    TERMINATED = "terminated"  # Session ended
+    State Transitions:
+    - IDLE → LISTENING (on session start)
+    - LISTENING → SPEAKING (on text received)
+    - SPEAKING → LISTENING (on synthesis complete)
+    - SPEAKING → BARGED_IN (on user interrupt, M3+)
+    - BARGED_IN → LISTENING (on interrupt handled, M3+)
+    - * → TERMINATED (on disconnect or error)
+
+    States:
+    - IDLE: Initial state, no activity
+    - LISTENING: Waiting for user speech/text input
+    - SPEAKING: Playing TTS audio to user
+    - BARGED_IN: User interrupted during playback (M3+)
+    - TERMINATED: Session ended, no further transitions
+    """
+
+    IDLE = "idle"
+    LISTENING = "listening"
+    SPEAKING = "speaking"
+    BARGED_IN = "barged_in"  # M3
+    TERMINATED = "terminated"
+
+
+# Valid state transitions
+VALID_TRANSITIONS: dict[SessionState, set[SessionState]] = {
+    SessionState.IDLE: {SessionState.LISTENING, SessionState.TERMINATED},
+    SessionState.LISTENING: {SessionState.SPEAKING, SessionState.TERMINATED},
+    SessionState.SPEAKING: {
+        SessionState.LISTENING,
+        SessionState.BARGED_IN,
+        SessionState.TERMINATED,
+    },
+    SessionState.BARGED_IN: {SessionState.LISTENING, SessionState.TERMINATED},
+    SessionState.TERMINATED: set(),  # Terminal state
+}
 
 
 @dataclass
@@ -61,9 +94,7 @@ class SessionMetrics:
         if self.first_audio_sent_ts is None:
             self.first_audio_sent_ts = now
             if self.last_text_received_ts is not None:
-                self.first_audio_latency_ms = (
-                    (now - self.last_text_received_ts) * 1000.0
-                )
+                self.first_audio_latency_ms = (now - self.last_text_received_ts) * 1000.0
 
         # Track frame timing for jitter analysis
         self.frame_send_times.append(now)
@@ -176,9 +207,7 @@ class SessionManager:
             while self.is_active:
                 try:
                     # Get next frame with timeout to allow shutdown checks
-                    frame = await asyncio.wait_for(
-                        self.audio_buffer.get(), timeout=0.1
-                    )
+                    frame = await asyncio.wait_for(self.audio_buffer.get(), timeout=0.1)
 
                     # Send to client via transport
                     await self.transport.send_audio_frame(frame)
@@ -216,16 +245,28 @@ class SessionManager:
             pass
 
     def transition_state(self, new_state: SessionState) -> None:
-        """Transition session to a new state.
+        """Transition session to a new state with validation.
 
         Args:
             new_state: Target state
+
+        Raises:
+            ValueError: If transition is invalid
         """
-        # old_state = self.state  # TODO: Use when logging is implemented
+        if new_state not in VALID_TRANSITIONS.get(self.state, set()):
+            raise ValueError(f"Invalid state transition: {self.state.value} → {new_state.value}")
+
+        old_state = self.state
         self.state = new_state
 
-        # Log state transition (future: add proper logging)
-        # logger.info(f"Session {self.session_id}: {self.state.value} → {new_state.value}")
+        logger.info(
+            "Session state transition",
+            extra={
+                "session_id": self.session_id,
+                "from_state": old_state.value,
+                "to_state": new_state.value,
+            },
+        )
 
     async def shutdown(self) -> None:
         """Gracefully shut down the session.
@@ -271,7 +312,6 @@ class SessionManager:
             "text_chunks": self.metrics.text_chunks_received,
             "frame_jitter_ms": self.metrics.compute_frame_jitter_ms(),
             "session_duration_s": (
-                (self.metrics.session_end_ts or time.monotonic())
-                - self.metrics.session_start_ts
+                (self.metrics.session_end_ts or time.monotonic()) - self.metrics.session_start_ts
             ),
         }

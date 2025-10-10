@@ -17,7 +17,7 @@ import socket
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 import grpc
@@ -27,6 +27,7 @@ import pytest_asyncio
 import websockets
 from redis import asyncio as aioredis
 from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
 from src.orchestrator.config import (
     LiveKitConfig,
@@ -63,7 +64,7 @@ def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.listen(1)
-        port = s.getsockname()[1]
+        port: int = s.getsockname()[1]
     return port
 
 
@@ -73,7 +74,7 @@ def get_free_port() -> int:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def grpc_event_loop_workaround() -> None:
+def grpc_event_loop_workaround() -> Iterable[None]:
     """Workaround for grpc-python event loop cleanup issues.
 
     grpc-python creates background threads that interact with the asyncio event loop.
@@ -447,7 +448,9 @@ async def orchestrator_server(
         except Exception:
             if attempt == 29:
                 server_task.cancel()
-                raise RuntimeError(f"Orchestrator server failed to start on port {ws_port}") from None
+                raise RuntimeError(
+                    f"Orchestrator server failed to start on port {ws_port}"
+                    ) from None
             await asyncio.sleep(0.5)
 
     try:
@@ -630,7 +633,12 @@ class FrameTimingValidator:
             AssertionError: If timing exceeds tolerance
         """
         if len(self.frame_times) < 2:
-            return {"mean_interval_ms": 0, "std_interval_ms": 0, "max_jitter_ms": 0, "p95_jitter_ms": 0}
+            return {
+                    "mean_interval_ms": 0,
+                    "std_interval_ms": 0,
+                    "max_jitter_ms": 0,
+                    "p95_jitter_ms": 0
+                    }
 
         # Calculate intervals
         intervals = np.diff(self.frame_times) * 1000  # Convert to ms
@@ -781,14 +789,36 @@ async def receive_audio_frames(
             data = json.loads(msg)
 
             if data.get("type") == "audio":
-                frames.append(data)
+                # Only collect frames with actual PCM data
+                if data.get("pcm"):
+                    frames.append(data)
 
-                # Check if final frame (is_final=True or empty audio)
-                if data.get("is_final") or not data.get("pcm"):
+                # Check if this is marked as final frame
+                if data.get("is_final"):
+                    logger.debug("Received final audio frame marker")
                     break
+
+                # Empty PCM indicates end of stream (but keep waiting for is_final)
+                if not data.get("pcm"):
+                    logger.debug("Received empty PCM frame, waiting for final marker")
+                    # Continue to check for is_final marker
+
         except TimeoutError:
+            # If we have frames and hit timeout, consider it complete
             if frames:
+                logger.debug(f"Timeout after receiving {len(frames)} frames, considering complete")
                 break
+            # If no frames yet, raise the timeout
+            raise
+        except (ConnectionClosed,
+                ConnectionClosedError,
+                ConnectionClosedOK) as e:
+            # Connection closed - this is OK if we already have frames
+            if frames:
+                logger.debug(f"Connection closed after receiving {len(frames)} frames: {e}")
+                break
+            # If no frames, this is an error
+            logger.error(f"Connection closed before receiving any frames: {e}")
             raise
 
     return frames

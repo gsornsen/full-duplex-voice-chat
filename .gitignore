@@ -119,3 +119,10 @@ INCIDENT_RESPONDER_SUMMARY.md
 
 src/client/web/.next
 src/client/web/.github
+
+# Test artifacts (added 2025-10-09)
+audio_output_*.wav
+tests/artifacts/
+
+# Working documentation archive (added 2025-10-09)
+docs/archive/working/

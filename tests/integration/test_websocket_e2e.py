@@ -103,7 +103,7 @@ async def test_websocket_text_to_audio_flow(orchestrator_server: Any, ws_client:
     # Validate FAL target (relaxed for CI)
     fal_summary = fal_metrics.get_summary()
     logger.info(f"FAL metrics: {fal_summary}")
-    assert fal_summary["p95"] < 1000, f"FAL p95 {fal_summary['p95']:.2f}ms exceeds 1000ms target (CI relaxed)"
+    assert fal_summary["p95"] < 1000, f"FAL p95 {fal_summary['p95']:.2f}ms exceeds 1000ms target (CI relaxed)" # noqa: E501
 
     # Validate frame timing
     timing_metrics = timing_validator.validate_timing()
@@ -313,7 +313,7 @@ async def test_websocket_frame_metadata(orchestrator_server: Any, ws_client: Any
                 pcm_data = b64decode(frame["pcm"])
                 # Allow some tolerance in frame size for CI
                 if len(pcm_data) != 1920:
-                    logger.warning(f"Frame {i} unexpected PCM size: {len(pcm_data)} (expected 1920)")
+                    logger.warning(f"Frame {i} unexpected PCM size: {len(pcm_data)} (expected 1920)") # noqa: E501
             except Exception as e:
                 logger.warning(f"Frame {i} invalid base64: {e}")
 
@@ -370,7 +370,7 @@ async def test_websocket_performance_under_load(orchestrator_server: Any) -> Non
 
     # FAL should still be reasonable under load (relaxed for CI)
     assert overall_fal["p95"] < 1500, (
-        f"FAL p95 {overall_fal['p95']:.2f}ms exceeds 1500ms under load (CI relaxed)"
+        f"FAL p95 {overall_fal['p95']:.2f}ms exceeds 1500ms under load (CI relaxed)" # noqa: E501
     )
 
     # Log per-session results

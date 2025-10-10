@@ -167,7 +167,7 @@ async def test_vad_processing_latency() -> None:
     )
 
     # Assert latency targets (relaxed for CI)
-    assert mean_latency < 10.0, f"Mean latency {mean_latency:.3f}ms exceeds 10ms target (CI relaxed)"
+    assert mean_latency < 10.0, f"Mean latency {mean_latency:.3f}ms exceeds 10ms target (CI relaxed)" # noqa: E501
     assert p95_latency < 20.0, f"p95 latency {p95_latency:.3f}ms exceeds 20ms target (CI relaxed)"
     assert max_latency < 50.0, f"Max latency {max_latency:.3f}ms exceeds 50ms target (CI relaxed)"
 
@@ -206,7 +206,7 @@ async def test_vad_debouncing() -> None:
         vad.process_frame(frame)
 
     # Should not have triggered - burst was too short
-    logger.info(f"After short burst: starts={len(speech_start_events)}, ends={len(speech_end_events)}")
+    logger.info(f"After short burst: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
 
     # Test 2: Long speech (10 frames = 200ms) - should trigger
     for _ in range(10):
@@ -214,7 +214,7 @@ async def test_vad_debouncing() -> None:
         vad.process_frame(frame)
 
     # Should have triggered by now
-    logger.info(f"After long speech: starts={len(speech_start_events)}, ends={len(speech_end_events)}")
+    logger.info(f"After long speech: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
     assert len(speech_start_events) >= 1, "Long speech did not trigger start event"
 
     # Test 3: Short silence gap (5 frames = 100ms) - should NOT end speech (need 300ms)
@@ -223,7 +223,7 @@ async def test_vad_debouncing() -> None:
         vad.process_frame(frame)
 
     # Should not have ended yet
-    logger.info(f"After short silence: starts={len(speech_start_events)}, ends={len(speech_end_events)}")
+    logger.info(f"After short silence: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
 
     # Test 4: Long silence (20 frames = 400ms) - should trigger end
     for _ in range(20):
@@ -231,7 +231,7 @@ async def test_vad_debouncing() -> None:
         vad.process_frame(frame)
 
     # Should have ended by now
-    logger.info(f"After long silence: starts={len(speech_start_events)}, ends={len(speech_end_events)}")
+    logger.info(f"After long silence: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
     assert len(speech_end_events) >= 1, "Long silence did not trigger end event"
 
 
@@ -334,7 +334,7 @@ async def test_vad_multiple_speech_segments() -> None:
         vad.process_frame(generate_silence(duration_ms=20, sample_rate=16000))
 
     # Validate events (allow some tolerance for VAD behavior)
-    logger.info(f"Speech segments: starts={len(speech_start_events)}, ends={len(speech_end_events)}")
+    logger.info(f"Speech segments: starts={len(speech_start_events)}, ends={len(speech_end_events)}") # noqa: E501
 
     # Expect at least 1 start/end pair, ideally 2
     assert len(speech_start_events) >= 1, (

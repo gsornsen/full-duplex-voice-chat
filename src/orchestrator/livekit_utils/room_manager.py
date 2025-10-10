@@ -141,9 +141,7 @@ class LiveKitRoomManager:
         """
         try:
             service = await self._ensure_session()
-            await service.delete_room(
-                api.DeleteRoomRequest(room=room_name)
-            )
+            await service.delete_room(api.DeleteRoomRequest(room=room_name))
         except Exception as e:
             raise RuntimeError(f"Failed to delete LiveKit room '{room_name}': {e}") from e
 
