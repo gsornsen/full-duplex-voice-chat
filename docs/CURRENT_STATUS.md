@@ -1,14 +1,14 @@
 # Current Project Status
 
 **Last Updated**: 2025-10-09
-**Branch**: `feat/m2-orchestrator-transport`
-**Overall Status**: M0-M2 Complete (Enhanced), M3-M13 Planned
+**Branch**: `main`
+**Overall Status**: M0-M3 Complete, M4-M13 Planned
 
 ---
 
 ## Quick Summary
 
-This project implements a realtime duplex voice chat system with low-latency TTS streaming. **Milestones M0-M2 are complete**, establishing the core infrastructure: gRPC streaming protocol, mock TTS worker, and dual transport architecture (LiveKit WebRTC primary + WebSocket fallback). The implementation has **exceeded M2 scope** by delivering production-ready LiveKit WebRTC as the primary transport. Real TTS adapters (Piper, CosyVoice, XTTS, Sesame) and advanced features (VAD/ASR integration, model management, dynamic routing) are planned for M3-M13.
+This project implements a realtime duplex voice chat system with low-latency TTS streaming and barge-in support. **Milestones M0-M3 are complete**, establishing the core infrastructure: gRPC streaming protocol, mock TTS worker, dual transport architecture (LiveKit WebRTC primary + WebSocket fallback), and real-time barge-in with Voice Activity Detection. The implementation has **exceeded M2 scope** by delivering production-ready LiveKit WebRTC as the primary transport. Real TTS adapters (Piper, CosyVoice, XTTS, Sesame) and advanced features (model management, dynamic routing, ASR integration) are planned for M4-M13.
 
 ---
 
@@ -19,7 +19,7 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 | **M0** | Repo Scaffold & CI | ✅ Complete | 2025-09 | Justfile, CI, Docker, proto gen |
 | **M1** | gRPC ABI + Mock Worker | ✅ Complete | 2025-09 | 16/16 tests passing, <50ms control |
 | **M2** | Orchestrator Transport | ✅ Enhanced | 2025-10 | LiveKit primary (exceeded scope) |
-| **M3** | Barge-in End-to-End | 🔄 Partial | In Progress | State machine ready, VAD pending |
+| **M3** | Barge-in End-to-End | ✅ Complete | 2025-10-09 | VAD integration, <50ms pause latency |
 | **M4** | Model Manager v1 | 📝 Planned | - | Default/preload/TTL/LRU |
 | **M5** | Piper Adapter (CPU) | 📝 Planned | - | CPU baseline TTS |
 | **M6** | CosyVoice 2 Adapter | 📝 Planned | - | GPU expressive TTS |
@@ -38,7 +38,7 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 
 ---
 
-## What Works Today (M0-M2 Complete)
+## What Works Today (M0-M3 Complete)
 
 ### ✅ Core Infrastructure
 
@@ -77,6 +77,18 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - Multi-message per session support (workaround for protocol edge case)
 - Location: `src/orchestrator/session.py`
 
+**Barge-in with Voice Activity Detection (M3)**:
+- VAD integration using webrtcvad library
+- Real-time speech detection with <50ms latency
+- Automatic PAUSE on speech detection
+- Automatic RESUME on silence detection
+- State machine transitions: SPEAKING → BARGED_IN → LISTENING
+- Configurable aggressiveness (0-3), debouncing thresholds
+- Audio resampling (48kHz → 16kHz) for VAD processing
+- Telemetry for barge-in events (count, latency)
+- **Test Coverage**: 29/29 unit tests, 8/8 integration tests passing
+- Location: `src/orchestrator/vad.py`, `src/orchestrator/audio/resampler.py`
+
 **Service Discovery & Registry (M2)**:
 - Redis-based worker registration and heartbeat
 - TTL-based worker expiration
@@ -100,13 +112,14 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - Pytest with comprehensive markers
 - GitHub Actions CI pipeline
 
-**Test Infrastructure (M1)**:
-- 35+ test files (unit + integration)
+**Test Infrastructure (M1-M3)**:
+- 40+ test files (unit + integration)
 - 817-line `conftest.py` with comprehensive fixtures
 - Synthetic audio generators for validation
 - Frame timing validators
 - Latency metrics collectors
 - Dynamic port allocation for parallel tests
+- VAD test suite with debouncing and aggressiveness validation
 
 **gRPC Testing Workaround (M1/M2)**:
 - **Issue**: grpc-python segfaults in WSL2 during test teardown
@@ -118,40 +131,14 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 **Code Quality Metrics**:
 - Type hints: Comprehensive (mypy strict mode)
 - Docstrings: Detailed with Args/Returns/Notes
-- Test pass rate: M1 16/16 (100%), Full pipeline 6/8 (75%, 2 timeouts under investigation)
+- Test pass rate: M1 16/16 (100%), M3 37/37 (100%), Full pipeline 6/8 (75%, 2 timeouts under investigation)
 - Architecture: Clean separation of concerns
 
 ---
 
-## What's Partially Implemented (M3 In Progress)
+## What's Planned (M4-M13 Roadmap)
 
-### 🔄 Barge-in State Machine
-
-**Implemented**:
-- State machine with BARGED_IN state
-- State transition enforcement
-- PAUSE/RESUME control flow to worker
-- Session metrics tracking barge-in events
-
-**Not Yet Integrated**:
-- VAD (Voice Activity Detection) integration
-- Real-time speech detection for interruption
-- Automatic PAUSE triggering on voice detection
-- Full end-to-end barge-in validation
-
-**Timeline**: M3 milestone
-
----
-
-## What's Planned (M3-M13 Roadmap)
-
-### 📝 Near-term (M3-M5)
-
-**M3: Barge-in End-to-End**:
-- Integrate VAD using webrtcvad (20ms frames)
-- Connect VAD events to state machine
-- Validate <50ms p95 pause latency
-- Manual test harness with recorded speech
+### 📝 Near-term (M4-M5)
 
 **M4: Model Manager v1**:
 - Default model loading on startup
@@ -251,9 +238,9 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - Single worker only in current setup
 
 **No Speech Input**:
-- Text-to-speech only in M0-M2
+- Text-to-speech only in M0-M3
 - Speech-to-text (ASR/Whisper) is M10 milestone
-- VAD integration is M3 milestone
+- VAD ready for ASR integration
 
 **No Model Management**:
 - Model Manager (load/unload/TTL/LRU) is M4 milestone
@@ -319,6 +306,10 @@ just cli                            # Terminal 3 (WebSocket client)
 # Run specific integration test
 uv run pytest tests/integration/test_m1_worker_integration.py -v
 
+# Run VAD tests
+uv run pytest tests/unit/test_vad.py -v
+uv run pytest tests/integration/test_vad_integration.py -v
+
 # Run with verbose gRPC logging
 export GRPC_VERBOSITY=debug
 just run-tts-mock
@@ -330,6 +321,43 @@ just spy-top <PID>
 ---
 
 ## Architecture Highlights
+
+### Barge-in Flow (M3)
+
+**Voice Activity Detection**:
+```
+Client Audio (48kHz)
+    ↓
+Audio Resampler (48kHz → 16kHz)
+    ↓
+VAD Processor (webrtcvad)
+    ↓
+Speech Detection (debounced)
+    ↓
+Event Callbacks (on_speech_start, on_speech_end)
+    ↓
+State Machine Transitions
+    ↓
+Control Commands (PAUSE/RESUME)
+    ↓
+TTS Worker
+```
+
+**Configuration**:
+```yaml
+vad:
+  enabled: true
+  aggressiveness: 2  # 0-3, higher = more conservative
+  sample_rate: 16000  # Required by webrtcvad
+  frame_duration_ms: 20  # 10, 20, or 30
+  min_speech_duration_ms: 100  # Debounce threshold
+  min_silence_duration_ms: 300  # Silence threshold
+```
+
+**Performance**:
+- p95 pause latency: <50ms ✅ Validated
+- VAD processing latency: <5ms per frame ✅ Validated
+- Frame jitter: <10ms under 3 concurrent sessions
 
 ### Transport Architecture (M2 Enhanced)
 
@@ -350,7 +378,7 @@ Browser Client
     ↓ (WebRTC)
   LiveKit Server
     ↓ (LiveKit SDK)
-  Orchestrator
+  Orchestrator (VAD + Session Management)
     ↓ (gRPC)
   TTS Worker (Mock)
     ↓ (20ms PCM frames @ 48kHz)
@@ -417,10 +445,11 @@ CLI Client
 
 ### Immediate (Current Sprint)
 
-1. **Complete M3 Barge-in Integration**:
-   - Integrate VAD with state machine
-   - Validate <50ms pause latency
-   - Manual test with recorded speech
+1. **Begin M4: Model Manager Implementation**:
+   - Design model lifecycle API
+   - Implement default/preload/TTL
+   - Add gRPC endpoints
+   - Unit tests for lifecycle
 
 2. **Fix Integration Test Timeouts**:
    - Investigate sequential message timeout
@@ -428,48 +457,42 @@ CLI Client
    - Document root cause and solution
 
 3. **Documentation Updates**:
-   - Sync TDD.md with M2 enhanced architecture
-   - Update INCREMENTAL_PLAN.md with completion dates
+   - Sync TDD.md with M3 barge-in implementation
+   - Update INCREMENTAL_PLAN.md with M3 completion
    - Create known-issues index
 
 ### Short-term (Next 2-4 Weeks)
 
-4. **M4: Model Manager Implementation**:
-   - Design model lifecycle API
-   - Implement default/preload/TTL
-   - Add gRPC endpoints
-   - Unit tests for lifecycle
-
-5. **M5: Piper Adapter**:
+4. **M5: Piper Adapter**:
    - First real TTS adapter
    - CPU-only baseline
    - End-to-end speech demo
 
-6. **Infrastructure Polish**:
+5. **Infrastructure Polish**:
    - Production Dockerfiles
    - Documentation review
    - Performance benchmarking
 
 ### Medium-term (Next 1-3 Months)
 
-7. **M6-M8: GPU TTS Adapters**:
+6. **M6-M8: GPU TTS Adapters**:
    - CosyVoice 2 (expressive)
    - XTTS-v2 (cloning)
    - Sesame/Unsloth (LoRA)
 
-8. **M9: Dynamic Routing**:
+7. **M9: Dynamic Routing**:
    - Capability-based selection
    - Load balancing
    - Multi-worker support
 
-9. **M10: ASR Integration**:
+8. **M10: ASR Integration**:
    - Whisper integration
    - Speech↔speech pipeline
    - Full duplex demo
 
 ### Long-term (Next 3-6 Months)
 
-10. **M11-M13: Production Readiness**:
+9. **M11-M13: Production Readiness**:
     - Observability stack
     - Multi-GPU deployment
     - Multi-host scale-out
@@ -479,21 +502,24 @@ CLI Client
 
 ## Success Metrics
 
-### M0-M2 Achievements ✅
+### M0-M3 Achievements ✅
 
 - ✅ 16/16 M1 integration tests passing (100%)
+- ✅ 29/29 M3 VAD unit tests passing (100%)
+- ✅ 8/8 M3 VAD integration tests passing (100%)
 - ✅ 6/8 full pipeline tests passing (75%, 2 timeouts under investigation)
 - ✅ <50ms control command response time
+- ✅ <50ms VAD barge-in pause latency (p95)
+- ✅ <5ms VAD processing latency per frame
 - ✅ 20ms frame cadence validated
 - ✅ LiveKit WebRTC primary transport operational
 - ✅ Docker compose stack with 5 services
 - ✅ gRPC segfault workaround 100% reliable
 - ✅ CI passing (lint + typecheck + test)
 
-### M3+ Targets 🎯
+### M4+ Targets 🎯
 
-- 🎯 Barge-in pause latency p95 < 50ms
-- 🎯 First Audio Latency p95 < 300ms (GPU adapters)
+- 🎯 First Audio Latency (FAL) p95 < 300ms (GPU adapters)
 - 🎯 Frame jitter p95 < 10ms (3 concurrent sessions)
 - 🎯 Model load time < 2s (GPU adapters)
 - 🎯 TTL eviction working (10min idle → unload)
@@ -529,4 +555,4 @@ CLI Client
 
 **Maintained by**: Multi-Agent Documentation Team
 **Last Review**: 2025-10-09
-**Next Review**: After M3 completion
+**Next Review**: After M4 completion

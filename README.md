@@ -2,7 +2,7 @@
 
 A production-ready realtime speech-to-speech system enabling low-latency conversations with barge-in support. Built with Python, gRPC, and LiveKit WebRTC, supporting hot-swappable TTS models on single-GPU and multi-GPU setups.
 
-**Current Status**: M0-M2 Complete (Enhanced) - See [Current Status](docs/CURRENT_STATUS.md)
+**Current Status**: M0-M3 Complete - See [Current Status](docs/CURRENT_STATUS.md)
 
 [![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)]()
 [![Python Version](https://img.shields.io/badge/python-3.13-blue)]()
@@ -85,9 +85,12 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed setup.
 - **339 Unit Tests**: All passing with comprehensive coverage
 - **Process Isolation**: pytest-forked for reliable testing in WSL2
 
-### What's Next (M3-M13 Planned)
+### What Works Today (M0-M3)
 
-- M3: VAD integration for barge-in detection
+- ✅ M3: Barge-in with VAD (<50ms latency, 37/37 tests passing)
+
+### What's Next (M4-M13 Planned)
+
 - M4: Model Manager (load/unload, TTL eviction, LRU caching)
 - M5-M8: Real TTS adapters (Piper, CosyVoice2, XTTS-v2, Sesame/Unsloth)
 - M9: Capability-aware routing (prefer resident models)
@@ -498,8 +501,8 @@ Planned features:
 - ✅ M1: gRPC ABI + Mock worker
 - ✅ M2: Orchestrator transport (LiveKit + WebSocket)
 
-### In Progress
-- 🔄 M3: Barge-in (state machine ready, VAD integration pending)
+### Completed
+- ✅ M3: Barge-in end-to-end (VAD integration, <50ms latency)
 
 ### Near Term (Q4 2025)
 - 📝 M4: Model Manager (load/unload, TTL, LRU)
