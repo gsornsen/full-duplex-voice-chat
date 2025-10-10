@@ -49,6 +49,7 @@ pytestmark = [
     skip_if_grpc_unsafe,
     pytest.mark.integration,
     pytest.mark.docker,
+    pytest.mark.grpc,
 ]
 
 

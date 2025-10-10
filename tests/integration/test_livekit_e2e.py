@@ -24,6 +24,9 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
+# Mark all tests in this module as gRPC tests (may be skipped in CI)
+pytestmark = pytest.mark.grpc
+
 
 @pytest.mark.integration
 @pytest.mark.livekit
