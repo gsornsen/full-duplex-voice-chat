@@ -18,7 +18,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -42,9 +42,7 @@ from src.orchestrator.server import start_server
 # Lazy imports for gRPC - only imported when gRPC fixtures are used
 # This prevents segfault issues when running non-gRPC tests
 if TYPE_CHECKING:
-    import grpc
-    from src.rpc.generated import tts_pb2, tts_pb2_grpc
-    from src.tts.worker import start_worker
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +304,7 @@ async def mock_tts_worker() -> AsyncIterator[str]:
     """
     # Lazy imports - only import when this fixture is used
     import grpc.aio
+
     from src.rpc.generated import tts_pb2, tts_pb2_grpc
     from src.tts.worker import start_worker
 
