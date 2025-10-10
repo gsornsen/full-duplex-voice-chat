@@ -36,7 +36,8 @@
       "Bash(tee:*)",
       "Bash(timeout 300 uv run pytest tests/integration/test_full_pipeline.py::test_full_pipeline_websocket_only --forked -v)",
       "Bash(timeout 600 uv run pytest tests/integration/test_m1_worker_integration.py --forked -v)",
-      "Read(//proc/**)"
+      "Read(//proc/**)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []
