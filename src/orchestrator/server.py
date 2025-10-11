@@ -139,7 +139,7 @@ async def handle_session(
         logger.info("Starting session handler", extra={"session_id": session_id})
 
         # Start TTS session with worker
-        model_id = "mock-440hz"  # M2: hardcoded model
+        model_id = "piper-en-us-lessac-medium"  # M5: Use Piper TTS
         await worker_client.start_session(session_id, model_id)
         logger.info(
             "TTS session started",

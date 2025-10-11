@@ -38,7 +38,8 @@
       "Bash(timeout 600 uv run pytest tests/integration/test_m1_worker_integration.py --forked -v)",
       "Read(//proc/**)",
       "WebFetch(domain:github.com)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -12,14 +12,14 @@ worker:
     lora: false
     cpu_ok: false
     languages: ["en"]
-    emotive_zero_prompt: true
+    #emotive_zero_prompt: true
     max_concurrent_sessions: 3  # Valid range: >= 1
 
 # Model Manager configuration (M4+ feature)
 model_manager:
   # Required default model (must exist)
-  # M4: Using mock model, M5+ will use real models like "cosyvoice2-en-base"
-  default_model_id: "mock-440hz"
+  # M5: Using Piper model as first real TTS adapter
+  default_model_id: "piper-en-us-lessac-medium"
 
   # Optional preload list
   preload_model_ids: []
