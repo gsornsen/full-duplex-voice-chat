@@ -409,7 +409,7 @@ async def test_invalid_worker_data_handling(redis_container: str) -> None:
     from redis import asyncio as aioredis
 
     # Arrange
-    redis = aioredis.from_url(redis_container, decode_responses=True)
+    redis = aioredis.from_url(redis_container, decode_responses=True)  # type: ignore[no-untyped-call]
 
     # Inject invalid data
     await redis.setex("worker:invalid-json", 30, "{ invalid json }")

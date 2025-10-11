@@ -8,9 +8,11 @@ and LRU-based capacity management.
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from src.tts.adapters.adapter_mock import MockTTSAdapter
+from src.tts.adapters.adapter_piper import PiperTTSAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -380,23 +382,41 @@ class ModelManager:
     async def _load_model_impl(self, model_id: str) -> Any:
         """Internal implementation of model loading.
 
-        For M4, we use MockTTSAdapter. In future milestones (M5-M8),
-        this will delegate to the appropriate adapter factory based on
-        model_id and voicepack metadata.
+        Routes to the appropriate adapter based on model_id prefix:
+        - "piper-*": PiperTTSAdapter (M5)
+        - Others: MockTTSAdapter (M1-M4)
+
+        Future milestones (M6-M8) will add more adapter types.
 
         Args:
             model_id: Model identifier
 
         Returns:
-            Model instance (currently MockTTSAdapter)
+            Model instance
+
+        Raises:
+            ModelNotFoundError: If Piper voicepack not found
         """
         logger.info("Loading model implementation", extra={"model_id": model_id})
 
-        # For M4, create a mock adapter with model_id
-        # In M5+, this will route to real adapters based on model family
-        adapter = MockTTSAdapter(model_id=model_id)
+        # Route to Piper adapter for piper-* models (M5)
+        if model_id.startswith("piper-"):
+            # Extract voice name from model_id
+            # (e.g., "piper-en-us-lessac-medium" -> "en-us-lessac-medium")
+            voice_name = model_id.replace("piper-", "", 1)
+            voicepack_path = Path(f"voicepacks/piper/{voice_name}")
 
-        return adapter
+            if not voicepack_path.exists():
+                raise ModelNotFoundError(
+                    f"Voicepack not found for model {model_id}: {voicepack_path}"
+                )
+
+            piper_adapter: Any = PiperTTSAdapter(model_id=model_id, model_path=voicepack_path)
+            return piper_adapter
+
+        # Default to mock adapter for testing
+        mock_adapter: Any = MockTTSAdapter(model_id=model_id)
+        return mock_adapter
 
     async def _warmup_model(self, model: Any, model_id: str) -> None:
         """Warmup model with synthetic utterance.

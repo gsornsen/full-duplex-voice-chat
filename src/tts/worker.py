@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import grpc
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from src.rpc.generated import tts_pb2, tts_pb2_grpc
 from src.tts.model_manager import ModelManager

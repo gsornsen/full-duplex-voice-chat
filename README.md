@@ -2,7 +2,7 @@
 
 A production-ready realtime speech-to-speech system enabling low-latency conversations with barge-in support. Built with Python, gRPC, and LiveKit WebRTC, supporting hot-swappable TTS models on single-GPU and multi-GPU setups.
 
-**Current Status**: M0-M3 Complete - See [Current Status](docs/CURRENT_STATUS.md)
+**Current Status**: M0-M5 Complete - See [Current Status](docs/CURRENT_STATUS.md)
 
 [![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)]()
 [![Python Version](https://img.shields.io/badge/python-3.13-blue)]()
