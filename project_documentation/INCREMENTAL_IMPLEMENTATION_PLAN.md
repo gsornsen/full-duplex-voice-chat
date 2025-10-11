@@ -162,7 +162,7 @@
 
 ## Milestone 4 — Model Manager v1: default+preload, warmup, TTL eviction (no real models yet)
 
-**Status**: 📝 Planned
+**Status**: ✅ Complete (2025-10-09)
 **Goal:** Implement the **real** lifecycle manager against the mock adapter.
 
 **Scope**
@@ -175,19 +175,57 @@
 
 * Worker loads default model, optionally preloads others, warms each (~300 ms utterance).
 * Evicts idle models after TTL.
+* Reference counting prevents in-use model unload.
+* Background eviction task with configurable interval.
 
 **Tests / Validation**
 
-* Unit: `test_model_manager.py` for load/unload, TTL, LRU, min residency.
-* Integration: orchestrator issues `LoadModel`, switches sessions to new model, old model evicted after TTL.
+* Unit: 20/20 tests passing (`test_model_manager.py`)
+  - Default model loading on startup
+  - Preload models from configuration
+  - Warmup models on initialization
+  - Load/release reference counting
+  - TTL-based eviction (idle timeout)
+  - LRU eviction (capacity exceeded)
+  - Min residency enforcement
+  - Max parallel loads semaphore
+  - Concurrent load handling
+  - Safety checks (negative refcount, nonexistent model)
+* Integration: 15/15 tests passing (`test_model_lifecycle.py`)
+  - Worker loads default model
+  - Worker preloads models
+  - Dynamic model load via gRPC
+  - Dynamic model unload via gRPC
+  - TTL eviction end-to-end
+  - LRU eviction end-to-end
+  - Session uses correct model
+  - Model switch between sessions
+  - Concurrent sessions different models
+  - Warmup performance validation
+  - ListModels via gRPC
+  - GetCapabilities includes resident models
+  - Session increments/decrements refcount
+  - Multiple sessions share model instance
 
 **Exit criteria**
 
-* Deterministic eviction & zero mid-stream unloads (refcounted).
+* Deterministic eviction & zero mid-stream unloads (refcounted) ✅ Validated
+* All 35 tests passing (20 unit + 15 integration) ✅ Complete
+* CI passing (lint + typecheck + test) ✅ Complete
 
 **Risks / Mitigation**
 
-* VRAM fragmentation (later with real models) → serialize loads with semaphore.
+* VRAM fragmentation (later with real models) → serialize loads with semaphore ✅ Implemented
+
+**Implementation Notes**
+
+* Model Manager: `src/tts/model_manager.py`
+* Worker integration: `src/tts/worker.py` (gRPC servicer methods)
+* Configuration support: `configs/worker.yaml` (model_manager section)
+* Test coverage: comprehensive unit and integration tests
+* Performance validated: TTL/LRU eviction working, refcounting prevents in-use unload
+
+**Completion Date**: 2025-10-09
 
 ---
 

@@ -41,20 +41,26 @@ class MockTTSAdapter:
     text chunk and supports pause/resume/stop control commands with < 50ms response time.
 
     Attributes:
+        model_id: Identifier for the model instance (for M4+ multi-model support)
         state: Current adapter state (IDLE, SYNTHESIZING, PAUSED, STOPPED)
         pause_event: Event for pause/resume signaling
         stop_event: Event for stop signaling
         lock: Async lock for protecting state transitions
     """
 
-    def __init__(self) -> None:
-        """Initialize the mock adapter."""
+    def __init__(self, model_id: str = "mock-440hz") -> None:
+        """Initialize the mock adapter.
+
+        Args:
+            model_id: Model identifier (default: "mock-440hz")
+        """
+        self.model_id = model_id
         self.state = AdapterState.IDLE
         self.pause_event = asyncio.Event()
         self.pause_event.set()  # Start unpaused
         self.stop_event = asyncio.Event()
         self.lock = asyncio.Lock()
-        logger.info("MockTTSAdapter initialized")
+        logger.info("MockTTSAdapter initialized", extra={"model_id": model_id})
 
     async def synthesize_stream(self, text_chunks: AsyncIterator[str]) -> AsyncIterator[bytes]:
         """Generate synthetic audio for each text chunk.
@@ -77,7 +83,10 @@ class MockTTSAdapter:
         """
         async with self.lock:
             self.state = AdapterState.SYNTHESIZING
-            logger.info("Starting synthesis stream", extra={"state": self.state.value})
+            logger.info(
+                "Starting synthesis stream",
+                extra={"state": self.state.value, "model_id": self.model_id},
+            )
 
         try:
             chunk_count = 0
@@ -85,7 +94,11 @@ class MockTTSAdapter:
                 chunk_count += 1
                 logger.debug(
                     "Processing text chunk",
-                    extra={"chunk_id": chunk_count, "text_length": len(text)},
+                    extra={
+                        "chunk_id": chunk_count,
+                        "text_length": len(text),
+                        "model_id": self.model_id,
+                    },
                 )
 
                 # Generate frames for this text chunk
@@ -98,7 +111,11 @@ class MockTTSAdapter:
 
                 logger.debug(
                     "Generated frames for chunk",
-                    extra={"chunk_id": chunk_count, "frame_count": len(frames)},
+                    extra={
+                        "chunk_id": chunk_count,
+                        "frame_count": len(frames),
+                        "model_id": self.model_id,
+                    },
                 )
 
                 # Yield frames with streaming delay
@@ -107,7 +124,11 @@ class MockTTSAdapter:
                     if self.stop_event.is_set():
                         logger.info(
                             "Synthesis stopped by STOP command",
-                            extra={"chunk_id": chunk_count, "frame_idx": frame_idx},
+                            extra={
+                                "chunk_id": chunk_count,
+                                "frame_idx": frame_idx,
+                                "model_id": self.model_id,
+                            },
                         )
                         return
 
@@ -119,14 +140,20 @@ class MockTTSAdapter:
 
                     yield frame
 
-            logger.info("Synthesis stream completed", extra={"total_chunks": chunk_count})
+            logger.info(
+                "Synthesis stream completed",
+                extra={"total_chunks": chunk_count, "model_id": self.model_id},
+            )
 
         finally:
             async with self.lock:
                 # Only reset to IDLE if we weren't stopped
                 if self.state != AdapterState.STOPPED:
                     self.state = AdapterState.IDLE
-                    logger.info("Synthesis stream ended", extra={"state": self.state.value})
+                    logger.info(
+                        "Synthesis stream ended",
+                        extra={"state": self.state.value, "model_id": self.model_id},
+                    )
 
     async def control(self, command: str) -> None:
         """Handle control commands with < 50ms response time.
@@ -152,12 +179,16 @@ class MockTTSAdapter:
                     self.pause_event.clear()  # Block synthesize_stream
                     logger.info(
                         "Adapter paused",
-                        extra={"command": command, "previous_state": previous_state.value},
+                        extra={
+                            "command": command,
+                            "previous_state": previous_state.value,
+                            "model_id": self.model_id,
+                        },
                     )
                 else:
                     logger.warning(
                         "PAUSE command ignored (not synthesizing)",
-                        extra={"current_state": self.state.value},
+                        extra={"current_state": self.state.value, "model_id": self.model_id},
                     )
 
             elif command == "RESUME":
@@ -166,12 +197,16 @@ class MockTTSAdapter:
                     self.pause_event.set()  # Unblock synthesize_stream
                     logger.info(
                         "Adapter resumed",
-                        extra={"command": command, "previous_state": previous_state.value},
+                        extra={
+                            "command": command,
+                            "previous_state": previous_state.value,
+                            "model_id": self.model_id,
+                        },
                     )
                 else:
                     logger.warning(
                         "RESUME command ignored (not paused)",
-                        extra={"current_state": self.state.value},
+                        extra={"current_state": self.state.value, "model_id": self.model_id},
                     )
 
             elif command == "STOP":
@@ -180,11 +215,18 @@ class MockTTSAdapter:
                 self.pause_event.set()  # Unblock if paused
                 logger.info(
                     "Adapter stopped",
-                    extra={"command": command, "previous_state": previous_state.value},
+                    extra={
+                        "command": command,
+                        "previous_state": previous_state.value,
+                        "model_id": self.model_id,
+                    },
                 )
 
             else:
-                logger.error("Unknown control command", extra={"command": command})
+                logger.error(
+                    "Unknown control command",
+                    extra={"command": command, "model_id": self.model_id},
+                )
                 raise ValueError(f"Unknown control command: {command}")
 
     async def load_model(self, model_id: str) -> None:
@@ -197,7 +239,10 @@ class MockTTSAdapter:
             This is a no-op for the mock adapter. Real adapters would load
             model weights and initialize inference engines here.
         """
-        logger.info("Mock load_model called (no-op)", extra={"model_id": model_id})
+        logger.info(
+            "Mock load_model called (no-op)",
+            extra={"model_id": model_id, "adapter_model_id": self.model_id},
+        )
 
     async def unload_model(self, model_id: str) -> None:
         """Mock model unload (no-op for testing).
@@ -209,7 +254,10 @@ class MockTTSAdapter:
             This is a no-op for the mock adapter. Real adapters would free
             model memory and release GPU resources here.
         """
-        logger.info("Mock unload_model called (no-op)", extra={"model_id": model_id})
+        logger.info(
+            "Mock unload_model called (no-op)",
+            extra={"model_id": model_id, "adapter_model_id": self.model_id},
+        )
 
     def get_state(self) -> AdapterState:
         """Get the current adapter state.
@@ -236,4 +284,4 @@ class MockTTSAdapter:
             self.state = AdapterState.IDLE
             self.pause_event.set()
             self.stop_event.clear()
-            logger.info("Adapter reset to initial state")
+            logger.info("Adapter reset to initial state", extra={"model_id": self.model_id})

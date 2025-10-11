@@ -18,7 +18,8 @@ worker:
 # Model Manager configuration (M4+ feature)
 model_manager:
   # Required default model (must exist)
-  default_model_id: "cosyvoice2-en-base"
+  # M4: Using mock model, M5+ will use real models like "cosyvoice2-en-base"
+  default_model_id: "mock-440hz"
 
   # Optional preload list
   preload_model_ids: []
