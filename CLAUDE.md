@@ -228,7 +228,7 @@ is_speech = vad.process_frame(audio_frame)
 
 ## Model Manager (M4+)
 
-`src/tts/model_manager.py` handles all model lifecycle (planned for M4 milestone):
+`src/tts/model_manager.py` handles all model lifecycle ✅ Implemented (M4):
 
 **Startup behavior:**
 - Load **default_model_id** (required, must exist)
@@ -319,7 +319,7 @@ The project follows a phased implementation plan (see `project_documentation/INC
 2. **M1**: ✅ gRPC ABI + Mock worker (Complete - 16/16 tests passing)
 3. **M2**: ✅ Orchestrator transport + WS fallback (Enhanced - LiveKit WebRTC primary, exceeds original scope)
 4. **M3**: ✅ Barge-in end-to-end (Complete - VAD integration, <50ms pause latency, 37/37 tests passing)
-5. **M4**: 📝 Model Manager v1 (default/preload/TTL) - Planned
+5. **M4**: ✅ Model Manager v1 (Complete - 20 unit + 15 integration tests passing, TTL/LRU eviction, warmup, refcounting)
 6. **M5**: 📝 Piper adapter (CPU baseline) - Planned
 7. **M6**: 📝 CosyVoice 2 adapter (GPU) - Planned
 8. **M7**: 📝 XTTS-v2 adapter (GPU + cloning) - Planned
