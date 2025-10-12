@@ -39,7 +39,12 @@
       "Read(//proc/**)",
       "WebFetch(domain:github.com)",
       "Bash(python:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(pip show:*)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.livekit.io)",
+      "Read(//home/gerald/.claude/agents/02-language-specialists/**)"
     ],
     "deny": [],
     "ask": []

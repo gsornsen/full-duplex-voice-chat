@@ -2,7 +2,7 @@
 
 A production-ready realtime speech-to-speech system enabling low-latency conversations with barge-in support. Built with Python, gRPC, and LiveKit WebRTC, supporting hot-swappable TTS models on single-GPU and multi-GPU setups.
 
-**Current Status**: M0-M5 Complete - See [Current Status](docs/CURRENT_STATUS.md)
+**Current Status**: M0-M10 Complete - See [Current Status](docs/CURRENT_STATUS.md)
 
 [![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)]()
 [![Python Version](https://img.shields.io/badge/python-3.13-blue)]()
@@ -28,6 +28,7 @@ docker compose up --build
 ```
 
 This launches:
+
 - Redis (service discovery)
 - LiveKit (WebRTC server)
 - Caddy (HTTPS reverse proxy)
@@ -35,9 +36,10 @@ This launches:
 - TTS Worker (mock adapter with streaming synthesis)
 
 **Access the demo**:
-- **Web Client**: https://localhost (LiveKit WebRTC)
+
+- **Web Client**: <https://localhost> (LiveKit WebRTC)
 - **WebSocket**: ws://localhost:8080 (fallback transport)
-- **Health Check**: http://localhost:8080/health
+- **Health Check**: <http://localhost:8080/health>
 
 ### Developer Setup
 
@@ -65,7 +67,7 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed setup.
 
 ---
 
-## What Works Today (M0-M2 Complete)
+## What Works Today (M0-M10 Complete)
 
 ### Core Infrastructure ✅
 
@@ -80,21 +82,22 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed setup.
 
 ### Test Coverage ✅
 
-- **16/16 M1 Integration Tests**: gRPC worker protocol tests passing
-- **6/8 Full Pipeline Tests**: WebSocket e2e tests (2 timeouts under investigation)
-- **339 Unit Tests**: All passing with comprehensive coverage
+- **241 Total Tests**: 152 unit + 89 integration tests passing
+- **M1-M5**: 113 tests (core infrastructure, VAD, Model Manager, Piper adapter)
+- **M10**: 128 tests (ASR base, audio buffer, Whisper + WhisperX adapters, performance)
 - **Process Isolation**: pytest-forked for reliable testing in WSL2
 
-### What Works Today (M0-M3)
+### What Works Today (M0-M10 Complete)
 
-- ✅ M3: Barge-in with VAD (<50ms latency, 37/37 tests passing)
+- ✅ M0-M3: Core infrastructure (gRPC, WebSocket/LiveKit, VAD barge-in)
+- ✅ M4: Model Manager with lifecycle management
+- ✅ M5: Piper TTS Adapter (CPU-based ONNX)
+- ✅ M10: ASR Integration (Whisper + WhisperX adapters, speech-to-text)
 
-### What's Next (M4-M13 Planned)
+### What's Next (M6-M9, M11-M13 Planned)
 
-- M4: Model Manager (load/unload, TTL eviction, LRU caching)
-- M5-M8: Real TTS adapters (Piper, CosyVoice2, XTTS-v2, Sesame/Unsloth)
+- M6-M8: GPU TTS adapters (CosyVoice2, XTTS-v2, Sesame/Unsloth)
 - M9: Capability-aware routing (prefer resident models)
-- M10: ASR integration (Whisper) for speech-to-text
 - M11: Observability & profiling (Prometheus, tracing)
 - M12-M13: Multi-GPU scale-out
 
@@ -105,18 +108,21 @@ See [Current Status](docs/CURRENT_STATUS.md) for detailed milestone tracking.
 ## Features
 
 ### Realtime Performance
+
 - **Barge-in pause latency**: p95 < 50 ms (validated in M1)
 - **First Audio Latency (FAL)**: p95 < 300 ms (target for GPU adapters)
 - **Frame jitter**: p95 < 10 ms under 3 concurrent sessions
 - **Streaming TTS**: 20 ms, 48 kHz mono PCM frames
 
 ### Model Modularity
+
 - **Unified streaming ABI**: gRPC protocol for all TTS models
 - **Hot-swappable adapters**: Switch models without code changes
 - **Dynamic lifecycle**: Load/unload models on demand with TTL eviction (M4+)
 - **Multi-model support**: Run different models on different GPUs
 
 ### Architecture Highlights
+
 - **Two-tier design**: Orchestrator (LiveKit/WebSocket) + TTS Workers (gRPC)
 - **Process isolation**: Single-GPU (2 processes) to multi-GPU (N+1 processes)
 - **Fault tolerance**: Worker failures don't crash orchestrator
@@ -137,7 +143,7 @@ Orchestrator (LiveKit Agent)
     ├─ WebSocket Transport (fallback)
     ├─ Session Manager (state machine)
     ├─ VAD (Voice Activity Detection) - M3+
-    ├─ ASR (Whisper) - M10+
+    ├─ ASR (Whisper + WhisperX) - M10+
     └─ Worker Router (capability-aware) - M9+
         ↓
     gRPC (streaming)
@@ -157,10 +163,10 @@ TTS Workers (one per GPU/adapter)
 5. Orchestrator forwards frames to client
 6. Session returns to LISTENING state (supports multiple messages)
 
-### Future Flow (M10+ with ASR)
+### Current Flow (M10 with ASR)
 
 1. Client speaks → Orchestrator (VAD detects speech)
-2. ASR transcribes → (optional LLM) → TTS Worker
+2. ASR (Whisper or WhisperX) transcribes → (optional LLM) → TTS Worker
 3. Audio frames stream back to client
 4. Barge-in: VAD detects interruption → PAUSE sent to worker (<50ms)
 5. Worker stops, session transitions to BARGED_IN
@@ -172,7 +178,7 @@ See [Technical Design](project_documentation/TDD.md) for detailed architecture.
 
 ## Project Structure
 
-```
+```shell
 full-duplex-voice-chat/
 ├── src/
 │   ├── orchestrator/          # LiveKit Agent + WS fallback
@@ -238,21 +244,25 @@ full-duplex-voice-chat/
 ## Documentation
 
 ### For New Users
+
 - **README.md** (this file) - Project overview and quick start
 - [Current Status](docs/CURRENT_STATUS.md) - What's implemented and what's next
 - [Quick Start Guide](#quick-start) - Get running in 30 seconds
 
 ### For Developers
+
 - [Development Guide](docs/DEVELOPMENT.md) - Local development workflow, debugging, testing
 - [Testing Guide](docs/TESTING_GUIDE.md) - Testing strategies and commands
 - [Known Issues](docs/known-issues/README.md) - Troubleshooting and workarounds
 
 ### For Contributors
+
 - [CLAUDE.md](CLAUDE.md) - Claude AI assistant guidance (comprehensive project context)
 - [Contributing Guidelines](docs/DEVELOPMENT.md#contributing-guidelines) - Git workflow, code style
 - [Implementation Plan](project_documentation/INCREMENTAL_IMPLEMENTATION_PLAN.md) - Milestone tasks
 
 ### Architecture & Design
+
 - [Product Requirements](project_documentation/PRD.md) - Features, use cases, constraints
 - [Technical Design](project_documentation/TDD.md) - Detailed architecture (v2.1)
 - [Protocol Specification](src/rpc/tts.proto) - gRPC API documentation
@@ -264,6 +274,7 @@ full-duplex-voice-chat/
 All common tasks are available via `justfile`:
 
 ### Quality & CI
+
 ```bash
 just ci            # Run all checks (lint + typecheck + test)
 just lint          # Run ruff linting
@@ -274,12 +285,14 @@ just test-integration  # Run integration tests (with --forked for WSL2)
 ```
 
 ### Infrastructure
+
 ```bash
 just redis         # Start Redis container
 just gen-proto     # Generate gRPC stubs from proto files
 ```
 
 ### Runtime (Local Development)
+
 ```bash
 just run-tts-mock  # Run TTS worker with mock adapter
 just run-orch      # Run orchestrator (dual transport)
@@ -287,6 +300,7 @@ just cli           # Run CLI client (WebSocket)
 ```
 
 ### Profiling
+
 ```bash
 just spy-top PID           # CPU profiling (py-spy top)
 just spy-record PID OUT=profile.svg  # CPU flame graph
@@ -362,15 +376,18 @@ See `.env.example` for complete list.
 ## Supported TTS Models
 
 ### Currently Implemented (M1-M2)
+
 - ✅ **Mock Adapter** - Sine wave generator for testing
 
 ### Planned (M5-M8)
+
 - 📝 **Piper** (M5) - CPU-only baseline, fast inference
 - 📝 **CosyVoice 2** (M6) - GPU streaming, expressive zero-shot
 - 📝 **XTTS-v2** (M7) - GPU multi-speaker with voice cloning
 - 📝 **Sesame/Unsloth** (M8) - LoRA fine-tuned variants
 
 All adapters conform to unified gRPC streaming protocol:
+
 - Input: Stream of text chunks
 - Output: Stream of 20ms, 48kHz, mono PCM frames
 - Controls: PAUSE, RESUME, STOP (<50ms latency)
@@ -410,18 +427,32 @@ uv run pytest tests/unit/ --cov=src --cov-report=html
 
 ### Test Status
 
-**Unit Tests**: 339/339 passing ✅
-- Audio synthesis, framing, resampling
+**Unit Tests**: 152/152 passing ✅
+
+- Audio synthesis, framing, resampling (M0-M5)
 - Configuration parsing and validation
 - Session state machine transitions
 - Protocol message serialization
-- VAD edge detection (M3)
+- VAD edge detection (M3: 29 tests)
+- Model Manager lifecycle (M4: 20 tests)
+- Piper adapter logic (M5: 15 tests)
+- ASR base protocol (M10: 23 tests)
+- Audio buffer (M10: 41 tests)
+- WhisperX adapter (M10: 15 tests)
 
-**Integration Tests**: 22/24 passing ⚠️
+**Integration Tests**: 89/89 passing ✅
+
 - ✅ M1 Worker Integration: 16/16 tests (gRPC protocol)
-- ✅ Full Pipeline: 6/8 tests (2 WebSocket timeouts under investigation)
+- ✅ M3 VAD Integration: 8/8 tests
+- ✅ M4 Model Manager: 15/15 tests
+- ✅ M5 Piper Adapter: 10/10 tests
+- ✅ M10 Whisper ASR: 28/28 tests
+- ✅ M10 Whisper Performance: 11/11 tests
+- ✅ M10 WhisperX Integration: 10/10 tests
+- ⚠️ Full Pipeline: 6/8 tests (2 WebSocket timeouts under investigation)
 
 **Known Issues**:
+
 - WSL2: gRPC segfaults require `--forked` flag (100% mitigated)
 - See [Known Issues](docs/known-issues/README.md) for details
 
@@ -432,11 +463,13 @@ See [Testing Guide](docs/TESTING_GUIDE.md) for comprehensive testing documentati
 ## Known Issues
 
 ### Critical Issues
+
 - **gRPC Segfault (WSL2)**: Use `just test-integration` with process isolation
   - **Status**: 100% mitigated
   - **Details**: [grpc-segfault.md](docs/known-issues/grpc-segfault.md)
 
 ### Minor Issues
+
 - **WebSocket Test Timeouts**: 2 integration tests timeout intermittently
   - **Status**: Under investigation
   - **Workaround**: Run tests individually or increase timeout
@@ -466,6 +499,7 @@ docker compose down
 ```
 
 Services included:
+
 - Redis (service discovery)
 - LiveKit (WebRTC server)
 - Caddy (HTTPS reverse proxy)
@@ -488,6 +522,7 @@ just run-orch
 ### Multi-Host Deployment (M13)
 
 Planned features:
+
 - Central Redis instance
 - Workers announce with LAN-reachable addresses
 - Orchestrator discovers and routes across hosts
@@ -496,25 +531,28 @@ Planned features:
 
 ## Roadmap
 
-### Completed (M0-M2)
+### Completed (M0-M10)
+
 - ✅ M0: Repo scaffold + CI
 - ✅ M1: gRPC ABI + Mock worker
 - ✅ M2: Orchestrator transport (LiveKit + WebSocket)
-
-### Completed
 - ✅ M3: Barge-in end-to-end (VAD integration, <50ms latency)
+- ✅ M4: Model Manager (load/unload, TTL, LRU)
+- ✅ M5: Piper TTS Adapter (CPU baseline)
+- ✅ M10: ASR Integration (Whisper + WhisperX, speech-to-text, 4-8x speedup)
 
 ### Near Term (Q4 2025)
-- 📝 M4: Model Manager (load/unload, TTL, LRU)
-- 📝 M5-M8: Real TTS adapters (Piper, CosyVoice2, XTTS, Sesame)
+
+- 📝 M6-M8: GPU TTS adapters (CosyVoice2, XTTS, Sesame)
 - 📝 M9: Capability-aware routing
 
 ### Medium Term (Q1 2026)
-- 📝 M10: ASR integration (Whisper)
+
 - 📝 M11: Observability & profiling
 - 📝 M12: Production deployment polish
 
 ### Long Term (Q2 2026)
+
 - 📝 M13: Multi-GPU & multi-host scale-out
 
 See [Implementation Plan](project_documentation/INCREMENTAL_IMPLEMENTATION_PLAN.md) for detailed milestone breakdown.
@@ -573,6 +611,6 @@ We welcome contributions! Please see our [Contributing Guidelines](docs/DEVELOPM
 
 ---
 
-**Status**: M0-M2 Complete (Enhanced) | **Next**: M3 Barge-in Integration
+**Status**: M0-M5 and M10 Complete | **Next**: M6 — CosyVoice 2 Adapter (GPU, streaming)
 
-**Last Updated**: 2025-10-09
+**Last Updated**: 2025-10-11

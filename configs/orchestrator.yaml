@@ -1,5 +1,5 @@
 # Orchestrator Configuration
-# M3: VAD integration for barge-in, WebSocket + LiveKit transport, static routing
+# M10: ASR integration, M3: VAD integration for barge-in, WebSocket + LiveKit transport, static routing
 
 transport:
   websocket:
@@ -33,11 +33,40 @@ routing:
 
 vad:
   enabled: true
-  aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
+  aggressiveness: 1  # Reduced from 2 to 1 for better tolerance of low audio levels after resampling
   sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
   frame_duration_ms: 20  # Valid values: 10, 20, 30
-  min_speech_duration_ms: 100  # Minimum speech duration to trigger barge-in (debouncing)
+  min_speech_duration_ms: 60  # Reduced from 100ms to 60ms (3 frames) for faster speech detection
   min_silence_duration_ms: 300  # Minimum silence duration to resume synthesis (debouncing)
+
+# M10: Automatic Speech Recognition (ASR) configuration
+asr:
+  enabled: true  # Enable ASR for speech-to-text transcription
+
+  # Adapter selection:
+  # - "whisper": Standard Whisper using faster-whisper
+  # - "whisperx": WhisperX with CTranslate2 backend (4x faster, recommended)
+  adapter: "whisperx"  # WhisperX for 4x faster inference
+
+  model_size: "small"  # Valid: tiny, base, small, medium, large
+  language: "en"  # ISO 639-1 language code (en, es, fr, etc.) or "auto"
+
+  # Device selection:
+  # - "cpu": Force CPU inference
+  # - "cuda": Use first available GPU
+  # - "cuda:0", "cuda:1", etc.: Specific GPU
+  # - "auto": Auto-select GPU if available, else CPU (recommended)
+  device: "auto"  # Auto-select GPU if available, else CPU
+
+  # Compute type:
+  # - "default": Auto-select int8 (CPU) or float16 (GPU) (recommended)
+  # - "float32": Highest precision, slower
+  # - "float16": Fast on GPU, full accuracy
+  # - "int8": Fast on CPU, good accuracy
+  compute_type: "default"  # Auto-select based on device
+
+  model_path: null  # Custom model path (optional, uses default if null)
+  buffer_max_duration_s: 30.0  # Maximum audio buffer duration (1.0-300.0 seconds)
 
 # Operational settings
 log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL

@@ -111,6 +111,18 @@ run-orch:
 cli HOST="ws://localhost:8080":
     uv run python -m src.client.cli_client --host {{HOST}}
 
+# Build web client for production
+web-build:
+    cd src/client/web && npm run build
+
+# Run web client (development mode)
+web-dev:
+    cd src/client/web && npm run dev
+
+# Run web client (production mode)
+web:
+    cd src/client/web && npm start
+
 # Profiling
 # ---------
 

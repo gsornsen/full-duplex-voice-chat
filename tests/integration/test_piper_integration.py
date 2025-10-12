@@ -31,7 +31,15 @@ def mock_piper_voice() -> Mock:
     voice = Mock()
     # Return 500ms of audio per synthesis call
     audio_samples = np.zeros(11025, dtype=np.int16)  # 500ms at 22050 Hz
-    voice.synthesize_stream_raw.return_value = [audio_samples]
+
+    # Create mock AudioChunk
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    audio_chunk.sample_rate = 22050
+    audio_chunk.sample_width = 2
+    audio_chunk.sample_channels = 1
+
+    voice.synthesize.return_value = [audio_chunk]
     return voice
 
 
@@ -129,7 +137,7 @@ async def test_end_to_end_session_synthesis(
         assert all(len(frame) == 1920 for frame in frames)
 
         # Verify Piper was called for both chunks
-        assert mock_piper_voice.synthesize_stream_raw.call_count == 2
+        assert mock_piper_voice.synthesize.call_count == 2
 
 
 @pytest.mark.integration
@@ -140,7 +148,9 @@ async def test_barge_in_pause_latency_maintained(
     """Test barge-in PAUSE latency is < 50ms with Piper adapter."""
     # Mock Piper to return long audio (5 seconds)
     audio_samples = np.zeros(110250, dtype=np.int16)  # 5 seconds at 22050 Hz
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice

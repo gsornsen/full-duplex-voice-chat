@@ -51,10 +51,20 @@ class LiveKitSession(TransportSession):
         self._room_name = room_name
         self._connected = True
 
-        # Audio track setup
+        # Audio track setup (outgoing - agent to client)
         self._audio_source: rtc.AudioSource | None = None
         self._audio_track: rtc.LocalAudioTrack | None = None
         self._sequence_number = 0
+
+        # Incoming audio (client to agent) for VAD/ASR
+        self._audio_stream_task: asyncio.Task[None] | None = None
+        self._on_audio_frame: Callable[[bytes], None] | None = None
+
+        # Audio frame buffering for VAD (accumulate to 20ms at 48kHz = 1920 bytes)
+        # LiveKit provides 10ms frames at 48kHz (960 bytes), we buffer two frames
+        # After resampling to 16kHz: 1920 bytes → 640 bytes (perfect for VAD)
+        self._audio_buffer = bytearray()
+        self._target_frame_size = 1920  # 20ms at 48kHz mono = 1920 bytes → 640 bytes @ 16kHz
 
         # Text message queue from data channel
         self._text_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -105,6 +115,244 @@ class LiveKitSession(TransportSession):
             "Audio track published",
             extra={"session_id": self._session_id, "room": self._room_name},
         )
+
+    def set_audio_frame_callback(self, callback: Callable[[bytes], None]) -> None:
+        """Set callback for incoming audio frames from participant.
+
+        This callback will be invoked with 20ms audio frames at 48kHz (1920 bytes).
+        LiveKit provides 10ms frames which are accumulated before calling this callback.
+        The VAD processor will then resample these 48kHz frames to 16kHz (640 bytes) for VAD.
+
+        Args:
+            callback: Function to call with audio frame bytes (PCM 16-bit, 48kHz, 1920 bytes)
+        """
+        self._on_audio_frame = callback
+        logger.info(
+            "Audio frame callback registered",
+            extra={"session_id": self._session_id},
+        )
+
+    async def subscribe_to_participant_audio(self) -> None:
+        """Subscribe to participant's audio tracks for VAD/ASR processing.
+
+        Must be called after session initialization to receive audio frames
+        from the participant's microphone.
+        """
+        logger.info(
+            "Subscribing to participant audio tracks",
+            extra={"session_id": self._session_id, "participant": self._participant.identity},
+        )
+
+        # FIX #2: Removed premature AudioStream creation - rely solely on track_subscribed event
+        # Previous code created AudioStreams for tracks that might not be subscribed yet,
+        # causing race condition where metadata frames were received before subscription complete.
+        # Now we only create AudioStreams in response to track_subscribed event (lines 184-203).
+
+        # Set up event handler for future track publications
+        def on_track_published(
+            publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        ) -> None:
+            if participant.identity == self._participant.identity:
+                logger.info(
+                    "Participant published new track",
+                    extra={
+                        "session_id": self._session_id,
+                        "track_sid": publication.sid,
+                        "kind": publication.kind,
+                    },
+                )
+                # Auto-subscribe to audio tracks
+                if publication.kind == rtc.TrackKind.KIND_AUDIO:
+                    publication.set_subscribed(True)
+
+        self._room.on("track_published", on_track_published)
+
+        # Set up event handler for track subscriptions
+        def on_track_subscribed(
+            track: rtc.Track,
+            publication: rtc.RemoteTrackPublication,
+            participant: rtc.RemoteParticipant,
+        ) -> None:
+            if (
+                participant.identity == self._participant.identity
+                and track.kind == rtc.TrackKind.KIND_AUDIO
+            ):
+                logger.info(
+                    "Subscribed to participant audio track",
+                    extra={
+                        "session_id": self._session_id,
+                        "track_sid": track.sid,
+                    },
+                )
+                # FIX #3: Cancel any existing audio stream task before creating a new one
+                # This prevents multiple competing AudioStream tasks from being active
+                if self._audio_stream_task is not None and not self._audio_stream_task.done():
+                    logger.info(
+                        "Canceling previous audio stream task before creating new one",
+                        extra={"session_id": self._session_id},
+                    )
+                    self._audio_stream_task.cancel()
+                    # Note: Cannot await in sync callback - task will be cleaned up by event loop
+
+                # Start receiving audio frames
+                self._audio_stream_task = asyncio.create_task(self._handle_audio_track(track))
+
+        self._room.on("track_subscribed", on_track_subscribed)
+
+        # Check for existing subscribed audio tracks
+        # Event handlers only fire for NEW events, so we must check for tracks
+        # that were already subscribed before we set up the handlers
+        for track_publication in self._participant.track_publications.values():
+            if (
+                track_publication.kind == rtc.TrackKind.KIND_AUDIO
+                and track_publication.subscribed  # ← Check subscription status
+                and track_publication.track is not None
+            ):
+                logger.info(
+                    "Found existing subscribed audio track",
+                    extra={
+                        "session_id": self._session_id,
+                        "track_sid": track_publication.sid,
+                        "track_name": track_publication.name,
+                    },
+                )
+                # Start receiving audio frames from existing track
+                self._audio_stream_task = asyncio.create_task(
+                    self._handle_audio_track(track_publication.track)
+                )
+
+    async def _handle_audio_track(self, track: rtc.Track) -> None:
+        """Handle incoming audio frames from participant's track.
+
+        Buffers incoming frames (typically 10ms at 48kHz after resampling to 16kHz)
+        and emits 20ms frames (640 bytes at 16kHz) to the audio callback for VAD processing.
+
+        Args:
+            track: Audio track to receive frames from
+        """
+        logger.info(
+            "Starting audio frame reception",
+            extra={"session_id": self._session_id, "track_sid": track.sid},
+        )
+
+        audio_stream = rtc.AudioStream(track)
+        frame_count = 0
+
+        try:
+            async for event in audio_stream:
+                if not self.is_connected:
+                    break
+
+                # Get audio frame (48kHz, mono or stereo)
+                frame = event.frame
+
+                # DEBUG: Log every frame received to verify LiveKit is sending audio
+                logger.info(
+                    "FRAME RECEIVED from LiveKit",
+                    extra={
+                        "session_id": self._session_id,
+                        "channels": frame.num_channels,
+                        "sample_rate": frame.sample_rate,
+                        "samples_per_channel": frame.samples_per_channel,
+                        "data_size_bytes": len(frame.data),
+                    },
+                )
+
+                # Convert to PCM bytes (16-bit signed int)
+                # Frame format: samples_per_channel samples, num_channels channels
+                # CRITICAL: Use .copy() to avoid memoryview lifecycle bug - np.frombuffer creates
+                # a view of the ctypes buffer, which becomes invalid after frame is GC'd
+                pcm_data = np.frombuffer(frame.data, dtype=np.int16).copy()
+
+                # DEBUG: Check raw audio sample values
+                logger.info(
+                    f"[AUDIO DEBUG] LiveKit frame raw data: "
+                    f"frame.sample_rate={frame.sample_rate}, "
+                    f"frame.num_channels={frame.num_channels}, "
+                    f"frame.samples_per_channel={frame.samples_per_channel}, "
+                    f"frame.data length={len(frame.data)} bytes, "
+                    f"pcm_data samples={len(pcm_data)}, "
+                    f"pcm_data dtype={pcm_data.dtype}, "
+                    f"min={np.min(pcm_data)}, "
+                    f"max={np.max(pcm_data)}, "
+                    f"mean={np.mean(pcm_data):.2f}, "
+                    f"std={np.std(pcm_data):.2f}, "
+                    f"first_10={pcm_data[:10].tolist()}"
+                )
+
+                # If stereo, convert to mono by averaging channels
+                if frame.num_channels == 2:
+                    # Reshape to (samples, 2) and average across channels
+                    pcm_data = pcm_data.reshape(-1, 2).mean(axis=1).astype(np.int16)
+
+                pcm_bytes = pcm_data.tobytes()
+
+                # Buffer the frame data at 48kHz
+                # LiveKit sends frames at 48kHz (typically 10ms = 960 bytes)
+                # We buffer to 1920 bytes (20ms at 48kHz) before passing to callback
+                # The VAD processor will then resample 48kHz → 16kHz (1920 bytes → 640 bytes)
+                self._audio_buffer.extend(pcm_bytes)
+
+                # DEBUG: Log buffer state
+                logger.debug(
+                    "Audio buffer state",
+                    extra={
+                        "session_id": self._session_id,
+                        "pcm_bytes_added": len(pcm_bytes),
+                        "buffer_size_bytes": len(self._audio_buffer),
+                        "target_size_bytes": self._target_frame_size,
+                    },
+                )
+
+                # Emit buffered frames when we have enough data
+                while len(self._audio_buffer) >= self._target_frame_size:
+                    # Extract exactly target_frame_size bytes
+                    frame_to_emit = bytes(self._audio_buffer[: self._target_frame_size])
+
+                    # Remove emitted data from buffer
+                    del self._audio_buffer[: self._target_frame_size]
+
+                    # Call audio frame callback (for VAD/ASR processing)
+                    if self._on_audio_frame is not None:
+                        try:
+                            # DEBUG: Log callback invocation
+                            logger.info(
+                                "CALLBACK INVOKED: Calling audio frame callback",
+                                extra={
+                                    "session_id": self._session_id,
+                                    "frame_size_bytes": len(frame_to_emit),
+                                },
+                            )
+                            self._on_audio_frame(frame_to_emit)
+                        except Exception as e:
+                            logger.error(
+                                "Error in audio frame callback",
+                                extra={"session_id": self._session_id, "error": str(e)},
+                            )
+
+                frame_count += 1
+                if frame_count % 50 == 0:  # Log every second (50 frames @ 20ms)
+                    logger.debug(
+                        "Received audio frames",
+                        extra={
+                            "session_id": self._session_id,
+                            "frame_count": frame_count,
+                            "sample_rate": frame.sample_rate,
+                            "samples": frame.samples_per_channel,
+                            "buffer_size": len(self._audio_buffer),
+                        },
+                    )
+
+        except Exception as e:
+            logger.error(
+                "Error receiving audio frames",
+                extra={"session_id": self._session_id, "error": str(e)},
+            )
+        finally:
+            logger.info(
+                "Audio frame reception ended",
+                extra={"session_id": self._session_id, "total_frames": frame_count},
+            )
 
     async def send_audio_frame(self, frame: bytes) -> None:
         """Send a 20ms PCM audio frame to the client.
@@ -258,6 +506,14 @@ class LiveKitSession(TransportSession):
         )
 
         try:
+            # Cancel audio stream task
+            if self._audio_stream_task is not None and not self._audio_stream_task.done():
+                self._audio_stream_task.cancel()
+                try:
+                    await self._audio_stream_task
+                except asyncio.CancelledError:
+                    pass
+
             # Unpublish audio track
             if self._audio_track is not None:
                 await self._room.local_participant.unpublish_track(self._audio_track.sid)
@@ -565,6 +821,9 @@ class LiveKitTransport(Transport):
                 # Initialize audio track
                 await session.initialize_audio_track()
 
+                # Subscribe to participant audio for VAD/ASR
+                await session.subscribe_to_participant_audio()
+
                 # Store session
                 self._active_sessions[session_id] = session
 
@@ -671,6 +930,9 @@ class LiveKitTransport(Transport):
 
             # Initialize audio track
             await session.initialize_audio_track()
+
+            # Subscribe to participant audio for VAD/ASR
+            await session.subscribe_to_participant_audio()
 
             # Store session
             self._active_sessions[session_id] = session

@@ -5,6 +5,7 @@ and detect speech events for barge-in functionality.
 """
 
 import logging
+import struct
 import time
 from collections.abc import Callable
 
@@ -104,8 +105,30 @@ class VADAudioProcessor:
             return False
 
         try:
+            # DEBUG: Calculate audio level before resampling
+            audio_level_48k = self._calculate_audio_level(frame_48khz)
+            is_silent_48k = audio_level_48k < 100
+
+            logger.info(
+                f"[VAD PROCESSOR DEBUG] Incoming frame: "
+                f"size={len(frame_48khz)} bytes (48kHz), "
+                f"audio_level={audio_level_48k:.1f}, "
+                f"is_silent={is_silent_48k}"
+            )
+
             # Resample 48kHz → 16kHz
             frame_16khz = self._resampler.process_frame(frame_48khz)
+
+            # DEBUG: Calculate audio level after resampling
+            audio_level_16k = self._calculate_audio_level(frame_16khz)
+            is_silent_16k = audio_level_16k < 100
+
+            logger.info(
+                f"[VAD PROCESSOR DEBUG] Resampled frame: "
+                f"size={len(frame_16khz)} bytes (16kHz), "
+                f"audio_level={audio_level_16k:.1f}, "
+                f"is_silent={is_silent_16k}"
+            )
 
             # Process through VAD
             is_speech = self._vad.process_frame(frame_16khz)
@@ -126,6 +149,24 @@ class VADAudioProcessor:
             # Log unexpected errors
             logger.error(f"Unexpected error in VAD processing: {e}", exc_info=True)
             return False
+
+    def _calculate_audio_level(self, frame: bytes) -> float:
+        """Calculate RMS audio level for debugging.
+
+        Args:
+            frame: Raw PCM audio frame (16-bit signed int, little endian)
+
+        Returns:
+            RMS audio level (0-32768 range for 16-bit audio)
+        """
+        # Unpack bytes as signed 16-bit integers
+        sample_count = len(frame) // 2
+        samples = struct.unpack(f"<{sample_count}h", frame)
+
+        # Calculate RMS
+        sum_squares = sum(sample * sample for sample in samples)
+        rms_value: float = float((sum_squares / sample_count) ** 0.5)
+        return rms_value
 
     def reset(self) -> None:
         """Reset VAD state.
