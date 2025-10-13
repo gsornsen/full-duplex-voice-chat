@@ -20,6 +20,8 @@ import asyncio
 import logging
 from typing import Final
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -338,3 +340,157 @@ class RingAudioBuffer(AudioBuffer):
 
             # Note: We don't log discards at debug level to avoid spam
             # Production systems should monitor utilization metrics instead
+
+
+class RMSBuffer:
+    """Circular buffer for RMS energy values used in adaptive noise gate.
+
+    Tracks recent RMS energy values to estimate noise floor using
+    percentile-based statistics. Used for adaptive threshold calculation
+    in noise gate to reduce false positive speech detections.
+
+    Thread-safety: NOT thread-safe. Use from single async task only.
+
+    Example:
+        ```python
+        # Create buffer for 2 seconds of history (100 frames @ 50fps)
+        rms_buffer = RMSBuffer(size=100)
+
+        # Track energy values
+        for frame in audio_frames:
+            rms = calculate_rms(frame)
+            rms_buffer.push(rms)
+
+        # Get noise floor estimate (25th percentile)
+        if rms_buffer.is_full():
+            noise_floor = rms_buffer.get_percentile(0.25)
+            threshold = noise_floor * 2.5
+        ```
+    """
+
+    def __init__(self, size: int) -> None:
+        """Initialize circular RMS buffer.
+
+        Args:
+            size: Maximum number of RMS values to store
+
+        Raises:
+            ValueError: If size is not positive
+        """
+        if size <= 0:
+            raise ValueError(f"Buffer size must be positive, got {size}")
+
+        self.size = size
+        self.buffer: list[float] = []
+        self.index = 0
+
+        logger.debug(f"RMSBuffer initialized: size={size}")
+
+    def push(self, value: float) -> None:
+        """Add RMS value to circular buffer.
+
+        Args:
+            value: RMS energy value (typically 0-32768 range for 16-bit audio)
+
+        Example:
+            ```python
+            rms = calculate_rms(audio_frame)
+            rms_buffer.push(rms)
+            ```
+        """
+        if len(self.buffer) < self.size:
+            # Buffer not full yet - append
+            self.buffer.append(value)
+        else:
+            # Buffer full - overwrite oldest value
+            self.buffer[self.index] = value
+            self.index = (self.index + 1) % self.size
+
+    def get_percentile(self, percentile: float) -> float:
+        """Calculate percentile of buffered RMS values.
+
+        Args:
+            percentile: Percentile to calculate (0.0-1.0, e.g., 0.25 = 25th percentile)
+
+        Returns:
+            Percentile value (0.0 if buffer is empty)
+
+        Raises:
+            ValueError: If percentile is not in range [0.0, 1.0]
+
+        Example:
+            ```python
+            # Get noise floor estimate (25th percentile)
+            noise_floor = rms_buffer.get_percentile(0.25)
+            # Get median
+            median = rms_buffer.get_percentile(0.50)
+            ```
+        """
+        if not 0.0 <= percentile <= 1.0:
+            raise ValueError(f"Percentile must be in range [0.0, 1.0], got {percentile}")
+
+        if not self.buffer:
+            return 0.0
+
+        return float(np.percentile(self.buffer, percentile * 100))
+
+    def is_full(self) -> bool:
+        """Check if buffer is full (has reached capacity).
+
+        Returns:
+            True if buffer contains 'size' elements, False otherwise
+
+        Example:
+            ```python
+            if rms_buffer.is_full():
+                # Buffer has enough data for reliable percentile calculation
+                noise_floor = rms_buffer.get_percentile(0.25)
+            ```
+        """
+        return len(self.buffer) >= self.size
+
+    def clear(self) -> None:
+        """Clear buffer and reset to empty state.
+
+        Example:
+            ```python
+            rms_buffer.clear()
+            assert not rms_buffer.is_full()
+            assert rms_buffer.get_percentile(0.25) == 0.0
+            ```
+        """
+        self.buffer.clear()
+        self.index = 0
+
+    @property
+    def count(self) -> int:
+        """Get number of values currently in buffer.
+
+        Returns:
+            Number of RMS values stored (0 to size)
+        """
+        return len(self.buffer)
+
+    @property
+    def utilization(self) -> float:
+        """Get buffer utilization as fraction of capacity.
+
+        Returns:
+            Utilization ratio (0.0 = empty, 1.0 = full)
+
+        Example:
+            ```python
+            if rms_buffer.utilization > 0.2:
+                # Buffer has at least 20% of data for percentile calculation
+                noise_floor = rms_buffer.get_percentile(0.25)
+            ```
+        """
+        return len(self.buffer) / self.size
+
+    def __repr__(self) -> str:
+        """Return string representation for debugging."""
+        return (
+            f"RMSBuffer(size={self.size}, "
+            f"count={len(self.buffer)}, "
+            f"utilization={self.utilization:.1%})"
+        )

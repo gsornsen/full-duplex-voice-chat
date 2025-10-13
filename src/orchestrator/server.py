@@ -476,6 +476,10 @@ async def handle_session(
     """
     session_id = session_manager.session_id
 
+    # Session lifecycle tracking (M10+)
+    session_start_time = time.monotonic()
+    message_count = 0
+
     # Create session resources (audio buffer, resampler)
     await orchestrator.create_session_resources(session_id)
 
@@ -591,7 +595,9 @@ async def handle_session(
                             audio_data = await asyncio.wait_for(audio_queue.get(), timeout=0.1)
 
                             # Process through VAD
-                            vad_processor.process_frame(audio_data)
+                            vad_processor.process_frame(
+                                audio_data, session_state=session_manager.state
+                            )
 
                             # Buffer for ASR if speaking
                             if vad_processor.is_speaking and config.asr.enabled:
@@ -642,13 +648,61 @@ async def handle_session(
         )
 
         # Main session loop: consume text input, stream audio output
-        # Supports multiple messages per session
+        # Supports multiple messages per session with idle timeout (M10+)
         while True:
-            # Wait for text input
-            logger.debug("Waiting for text input", extra={"session_id": session_id})
+            # Check session limits (M10+)
+            session_duration = time.monotonic() - session_start_time
+            if session_duration > config.session.max_session_duration_seconds:
+                logger.info(
+                    "Session max duration reached",
+                    extra={
+                        "session_id": session_id,
+                        "duration_s": session_duration,
+                        "limit_s": config.session.max_session_duration_seconds,
+                    },
+                )
+                break
+
+            if message_count >= config.session.max_messages_per_session:
+                logger.info(
+                    "Session max messages reached",
+                    extra={
+                        "session_id": session_id,
+                        "message_count": message_count,
+                        "limit": config.session.max_messages_per_session,
+                    },
+                )
+                break
+
+            # Transition to WAITING_FOR_INPUT (ready for next turn) - M10+
+            if session_manager.state == SessionState.LISTENING:
+                session_manager.transition_state(SessionState.WAITING_FOR_INPUT)
+
+            # Wait for text input with idle timeout (M10+)
+            logger.debug(
+                "Waiting for next turn (with timeout)",
+                extra={
+                    "session_id": session_id,
+                    "timeout_s": config.session.idle_timeout_seconds,
+                },
+            )
 
             try:
-                text = await session_manager.transport.receive_text().__anext__()
+                # Wait for next text with timeout
+                text = await asyncio.wait_for(
+                    session_manager.transport.receive_text().__anext__(),
+                    timeout=config.session.idle_timeout_seconds,
+                )
+            except TimeoutError:
+                # No user input within timeout (idle timeout reached)
+                logger.info(
+                    "Session idle timeout (no user input)",
+                    extra={
+                        "session_id": session_id,
+                        "idle_timeout_s": config.session.idle_timeout_seconds,
+                    },
+                )
+                break
             except StopAsyncIteration:
                 # Client closed text stream
                 logger.info("Client closed text stream", extra={"session_id": session_id})
@@ -669,9 +723,16 @@ async def handle_session(
                 )
                 continue
 
+            # Increment message count (M10+)
+            message_count += 1
+
             logger.info(
                 "Received text from client",
-                extra={"session_id": session_id, "text_length": len(text)},
+                extra={
+                    "session_id": session_id,
+                    "text_length": len(text),
+                    "message_count": message_count,
+                },
             )
 
             # Transition to SPEAKING state

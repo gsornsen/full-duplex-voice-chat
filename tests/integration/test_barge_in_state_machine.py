@@ -266,6 +266,9 @@ async def test_state_machine_guards() -> None:
                 manager.transition_state(SessionState.LISTENING)
                 manager.transition_state(SessionState.SPEAKING)
                 manager.transition_state(SessionState.BARGED_IN)
+            elif from_state == SessionState.WAITING_FOR_INPUT:
+                manager.transition_state(SessionState.LISTENING)
+                manager.transition_state(SessionState.WAITING_FOR_INPUT)
             elif from_state == SessionState.TERMINATED:
                 manager.transition_state(SessionState.LISTENING)
                 manager.transition_state(SessionState.TERMINATED)
