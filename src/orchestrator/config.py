@@ -86,6 +86,97 @@ class RoutingConfig(BaseModel):
     )
 
 
+class SessionConfig(BaseModel):
+    """Session lifecycle configuration for multi-turn conversations.
+
+    Controls session timeout behavior to enable multi-turn conversations
+    while preventing runaway sessions and resource exhaustion.
+
+    Example:
+        ```yaml
+        session:
+          idle_timeout_seconds: 300  # 5 minutes idle timeout
+          max_session_duration_seconds: 3600  # 1 hour max duration
+          max_messages_per_session: 100  # Max 100 messages
+        ```
+    """
+
+    idle_timeout_seconds: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="Idle timeout in seconds (disconnect after no user input)",
+    )
+    max_session_duration_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=14400,
+        description="Maximum session duration in seconds (hard limit)",
+    )
+    max_messages_per_session: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum messages per session (prevent runaway)",
+    )
+
+
+class NoiseGateConfig(BaseModel):
+    """Adaptive noise gate configuration for VAD false positive reduction.
+
+    The noise gate filters out low-energy audio frames before VAD processing
+    using a percentile-based adaptive threshold that tracks ambient noise levels.
+
+    Pipeline: Audio → RMS calculation → Noise gate → VAD processing
+
+    Example:
+        ```yaml
+        noise_gate:
+          enabled: true
+          window_size: 100  # 2 seconds @ 50fps
+          percentile: 0.25  # 25th percentile = noise floor
+          threshold_multiplier: 2.5  # 2.5x noise floor
+          min_threshold: 200.0  # Absolute minimum
+          update_interval_frames: 10  # Update every 200ms
+        ```
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable adaptive noise gate (M10 Polish Task 4)",
+    )
+    window_size: int = Field(
+        default=100,
+        ge=10,
+        le=500,
+        description="RMS history window size in frames (100 frames = 2s @ 50fps)",
+    )
+    percentile: float = Field(
+        default=0.25,
+        ge=0.01,
+        le=0.99,
+        description="Percentile for noise floor estimation (0.25 = 25th percentile)",
+    )
+    threshold_multiplier: float = Field(
+        default=2.5,
+        ge=1.0,
+        le=10.0,
+        description="Adaptive threshold = noise_floor * multiplier",
+    )
+    min_threshold: float = Field(
+        default=200.0,
+        ge=0.0,
+        le=10000.0,
+        description="Minimum absolute threshold (RMS value)",
+    )
+    update_interval_frames: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Update noise floor every N frames (10 = 200ms @ 50fps)",
+    )
+
+
 class VADConfig(BaseModel):
     """Voice Activity Detection configuration."""
 
@@ -118,6 +209,36 @@ class VADConfig(BaseModel):
         description="Minimum silence duration to trigger speech_end event (debouncing)",
     )
 
+    # State-aware VAD intensity gating (M10 Polish Task 3)
+    state_aware_gating: bool = Field(
+        default=True,
+        description="Enable state-aware VAD gating to reduce false barge-ins",
+    )
+    speaking_threshold_multiplier: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description="Threshold multiplier during SPEAKING state",
+    )
+    listening_threshold_multiplier: float = Field(
+        default=1.0,
+        ge=0.5,
+        le=5.0,
+        description="Threshold multiplier during LISTENING/WAITING_FOR_INPUT",
+    )
+    barged_in_threshold_multiplier: float = Field(
+        default=1.2,
+        ge=1.0,
+        le=5.0,
+        description="Threshold multiplier during BARGED_IN state",
+    )
+
+    # Adaptive noise gate (M10 Polish Task 4)
+    noise_gate: NoiseGateConfig = Field(
+        default_factory=NoiseGateConfig,
+        description="Adaptive noise gate configuration",
+    )
+
     @field_validator("sample_rate")
     @classmethod
     def validate_sample_rate(cls, v: int) -> int:
@@ -137,6 +258,116 @@ class VADConfig(BaseModel):
         return v
 
 
+class ASRConfig(BaseModel):
+    """Automatic Speech Recognition (ASR) configuration.
+
+    ASR is opt-in for M10 - disabled by default to maintain backward compatibility.
+    When enabled, user speech detected by VAD is transcribed and can be processed
+    by TTS or other downstream components.
+
+    Available adapters:
+    - whisper: Standard Whisper implementation using faster-whisper
+    - whisperx: WhisperX with CTranslate2 backend (4x faster, recommended)
+
+    Example usage:
+        ```yaml
+        asr:
+          enabled: true
+          adapter: "whisperx"  # 4x faster than whisper
+          model_size: "small"
+          language: "en"
+          device: "auto"  # Auto-select GPU if available
+          compute_type: "default"  # Auto-select int8 (CPU) or float16 (GPU)
+        ```
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable ASR processing (opt-in for M10)",
+    )
+    adapter: str = Field(
+        default="whisper",
+        description="ASR adapter type (whisper, whisperx, vosk, etc.)",
+    )
+    model_size: str = Field(
+        default="small",
+        description="Model size variant (tiny, base, small, medium, large)",
+    )
+    language: str = Field(
+        default="en",
+        description="Target language (ISO 639-1 code: en, es, fr, etc.)",
+    )
+    device: str = Field(
+        default="cpu",
+        description="Inference device (cpu, cuda, cuda:0, cuda:1, auto)",
+    )
+    compute_type: str = Field(
+        default="float32",
+        description="Compute precision (default, float32, float16, int8)",
+    )
+    model_path: str | None = Field(
+        default=None,
+        description="Custom model path (optional, uses default if None)",
+    )
+    buffer_max_duration_s: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Maximum audio buffer duration in seconds",
+    )
+
+    @field_validator("adapter")
+    @classmethod
+    def validate_adapter(cls, v: str) -> str:
+        """Validate that adapter type is supported."""
+        valid_adapters = ["whisper", "whisperx", "vosk"]
+        if v not in valid_adapters:
+            raise ValueError(f"ASR adapter must be one of {valid_adapters}, got '{v}'")
+        return v
+
+    @field_validator("model_size")
+    @classmethod
+    def validate_model_size(cls, v: str) -> str:
+        """Validate that model size is supported."""
+        valid_sizes = ["tiny", "base", "small", "medium", "large"]
+        if v not in valid_sizes:
+            raise ValueError(f"ASR model_size must be one of {valid_sizes}, got {v}")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        """Validate language code format."""
+        # Basic validation: 2-letter ISO 639-1 code or "auto"
+        if v == "auto":
+            return v
+        if len(v) != 2 or not v.isalpha():
+            raise ValueError(
+                f"ASR language must be 2-letter ISO 639-1 code or 'auto', got '{v}'"
+            )
+        return v.lower()
+
+    @field_validator("device")
+    @classmethod
+    def validate_device(cls, v: str) -> str:
+        """Validate device specification."""
+        valid_prefixes = ["cpu", "cuda", "cuda:", "auto"]
+        if not any(v.startswith(prefix) for prefix in valid_prefixes):
+            raise ValueError(
+                f"ASR device must start with 'cpu', 'cuda', 'cuda:N', or 'auto', got '{v}'"
+            )
+        return v
+
+    @field_validator("compute_type")
+    @classmethod
+    def validate_compute_type(cls, v: str) -> str:
+        """Validate compute type."""
+        valid_types = ["default", "float32", "float16", "int8"]
+        if v not in valid_types:
+            raise ValueError(f"ASR compute_type must be one of {valid_types}, got '{v}'")
+        return v
+
+
 class OrchestratorConfig(BaseModel):
     """Root orchestrator configuration."""
 
@@ -144,6 +375,8 @@ class OrchestratorConfig(BaseModel):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
+    asr: ASRConfig = Field(default_factory=ASRConfig)
+    session: SessionConfig = Field(default_factory=SessionConfig)
 
     # Operational settings
     log_level: str = Field(
@@ -172,7 +405,7 @@ class OrchestratorConfig(BaseModel):
         """
         import os
 
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
@@ -209,6 +442,27 @@ class OrchestratorConfig(BaseModel):
             if "livekit" not in data["transport"]:
                 data["transport"]["livekit"] = {}
             data["transport"]["livekit"]["api_secret"] = livekit_api_secret
+
+        # Apply ASR environment variable overrides
+        if asr_enabled := os.getenv("ASR_ENABLED"):
+            if "asr" not in data:
+                data["asr"] = {}
+            data["asr"]["enabled"] = asr_enabled.lower() in ("true", "1", "yes")
+
+        if asr_adapter := os.getenv("ASR_ADAPTER"):
+            if "asr" not in data:
+                data["asr"] = {}
+            data["asr"]["adapter"] = asr_adapter
+
+        if asr_model_size := os.getenv("ASR_MODEL_SIZE"):
+            if "asr" not in data:
+                data["asr"] = {}
+            data["asr"]["model_size"] = asr_model_size
+
+        if asr_device := os.getenv("ASR_DEVICE"):
+            if "asr" not in data:
+                data["asr"] = {}
+            data["asr"]["device"] = asr_device
 
         return cls.model_validate(data)
 

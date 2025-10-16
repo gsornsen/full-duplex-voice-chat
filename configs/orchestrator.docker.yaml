@@ -32,11 +32,68 @@ routing:
   prefer_resident_models: true
   load_balance_strategy: "queue_depth"
 
+# M10 Polish: Session management for multi-turn conversations (Task 2)
+session:
+  idle_timeout_seconds: 300  # 5 minutes idle timeout before disconnect
+  max_session_duration_seconds: 3600  # 1 hour maximum session duration (hard limit)
+  max_messages_per_session: 100  # Maximum 100 messages per session (prevent runaway)
+
+# M10 Polish: Optimized VAD configuration for <5% false barge-in rate (Task 6)
 vad:
   enabled: true
-  aggressiveness: 2  # Valid range: 0 (least) to 3 (most aggressive)
+
+  # Core VAD settings - optimized for low false positive rate
+  aggressiveness: 1  # Level 1: Optimal balance for layered filtering (noise gate + state gating + VAD)
   sample_rate: 16000  # Valid values: 8000, 16000, 32000, 48000 (webrtcvad requirement: 16000)
   frame_duration_ms: 20  # Valid values: 10, 20, 30
+  min_speech_duration_ms: 80  # Optimized: 80ms (4 frames) for transient noise rejection, up from 60ms
+  min_silence_duration_ms: 300  # Minimum silence duration to resume synthesis (debouncing)
+
+  # M10 Polish Task 3: State-aware VAD intensity gating
+  # Applies context-dependent thresholds based on session state to reduce false positives
+  state_aware_gating: true  # Enable state-aware threshold multipliers
+  speaking_threshold_multiplier: 2.5  # Optimized: 2.5x during SPEAKING (up from 2.0x) - primary false positive reduction
+  listening_threshold_multiplier: 1.0  # Baseline during LISTENING/WAITING_FOR_INPUT (full sensitivity)
+  barged_in_threshold_multiplier: 1.2  # 1.2x during BARGED_IN (filters residual TTS while tracking speech)
+
+  # M10 Polish Task 4: Adaptive noise gate configuration
+  # Percentile-based noise floor estimation with adaptive thresholding
+  noise_gate:
+    enabled: true  # Enable adaptive noise gate
+    window_size: 100  # 100 frames = 2 seconds @ 50fps - optimal stability/adaptation balance
+    percentile: 0.25  # 25th percentile = noise floor (robust to outliers)
+    threshold_multiplier: 3.0  # Optimized: 3.0x noise floor (up from 2.5x) - stronger noise filtering
+    min_threshold: 200.0  # Absolute minimum threshold (RMS value, prevents overly low thresholds)
+    update_interval_frames: 10  # Update noise floor every 200ms (efficient CPU usage)
+
+# M10: Automatic Speech Recognition (ASR) configuration
+asr:
+  enabled: true  # Enable ASR for speech-to-text transcription
+
+  # Adapter selection:
+  # - "whisper": Standard Whisper using faster-whisper
+  # - "whisperx": WhisperX with CTranslate2 backend (4x faster, recommended)
+  adapter: "whisperx"  # WhisperX for 4x faster inference
+
+  model_size: "small"  # Valid: tiny, base, small, medium, large
+  language: "en"  # ISO 639-1 language code (en, es, fr, etc.) or "auto"
+
+  # Device selection:
+  # - "cpu": Force CPU inference
+  # - "cuda": Use first available GPU
+  # - "cuda:0", "cuda:1", etc.: Specific GPU
+  # - "auto": Auto-select GPU if available, else CPU (recommended)
+  device: "auto"  # Auto-select GPU if available, else CPU
+
+  # Compute type:
+  # - "default": Auto-select int8 (CPU) or float16 (GPU) (recommended)
+  # - "float32": Highest precision, slower
+  # - "float16": Fast on GPU, full accuracy
+  # - "int8": Fast on CPU, good accuracy
+  compute_type: "default"  # Auto-select based on device
+
+  model_path: null  # Custom model path (optional, uses default if null)
+  buffer_max_duration_s: 30.0  # Maximum audio buffer duration (1.0-300.0 seconds)
 
 # Operational settings
 log_level: "INFO"  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL

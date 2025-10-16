@@ -39,7 +39,16 @@
       "Read(//proc/**)",
       "WebFetch(domain:github.com)",
       "Bash(python:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(pip show:*)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.livekit.io)",
+      "Read(//home/gerald/.claude/agents/02-language-specialists/**)",
+      "Bash(npm run build)",
+      "Bash(cat:*)",
+      "Bash(timeout 5 uv run python -m src.tts.worker:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

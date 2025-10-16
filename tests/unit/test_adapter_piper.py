@@ -25,8 +25,8 @@ from src.tts.adapters.adapter_piper import (
 def mock_piper_voice() -> Mock:
     """Create a mock PiperVoice instance."""
     voice = Mock()
-    # Mock synthesize_stream_raw to return audio chunks
-    voice.synthesize_stream_raw = Mock()
+    # Mock synthesize to return AudioChunk objects
+    voice.synthesize = Mock()
     return voice
 
 
@@ -148,7 +148,9 @@ async def test_synthesize_single_chunk(
     """Test synthesis of a single text chunk."""
     # Mock Piper to return 1 second of audio at 22050 Hz
     audio_samples = np.zeros(22050, dtype=np.int16)
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -182,7 +184,9 @@ async def test_synthesize_multiple_chunks(
     """Test synthesis of multiple text chunks."""
     # Mock Piper to return 500ms of audio per chunk
     audio_samples = np.zeros(11025, dtype=np.int16)  # 500ms at 22050 Hz
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -202,7 +206,7 @@ async def test_synthesize_multiple_chunks(
         # Should have frames from all chunks
         assert len(frames) > 0
         # Piper should have been called 3 times
-        assert mock_piper_voice.synthesize_stream_raw.call_count == 3
+        assert mock_piper_voice.synthesize.call_count == 3
 
 
 @pytest.mark.unit
@@ -212,7 +216,7 @@ async def test_synthesize_empty_audio(
 ) -> None:
     """Test synthesis when Piper returns empty audio."""
     # Mock Piper to return empty audio
-    mock_piper_voice.synthesize_stream_raw.return_value = []
+    mock_piper_voice.synthesize.return_value = []
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -358,7 +362,9 @@ async def test_control_pause_during_synthesis(
     """Test PAUSE command during synthesis."""
     # Mock Piper to return long audio (5 seconds)
     audio_samples = np.zeros(110250, dtype=np.int16)  # 5 seconds at 22050 Hz
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -415,7 +421,9 @@ async def test_control_resume_after_pause(
     """Test RESUME command after PAUSE."""
     # Mock Piper to return audio
     audio_samples = np.zeros(110250, dtype=np.int16)
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -464,7 +472,9 @@ async def test_control_stop_terminates_synthesis(
 ) -> None:
     """Test STOP command terminates synthesis immediately."""
     audio_samples = np.zeros(110250, dtype=np.int16)
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -573,7 +583,9 @@ async def test_warmup_completes_quickly(
     """Test warmup synthesis completes in < 1 second."""
     # Mock Piper to return audio quickly
     audio_samples = np.zeros(22050, dtype=np.int16)
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -592,7 +604,7 @@ async def test_warmup_completes_quickly(
         assert warmup_duration < 1000
 
         # Piper should have been called for warmup
-        assert mock_piper_voice.synthesize_stream_raw.called
+        assert mock_piper_voice.synthesize.called
 
 
 @pytest.mark.unit
@@ -603,7 +615,9 @@ async def test_rtf_calculation_realistic(
     """Test Real-Time Factor (RTF) is calculated correctly."""
     # Mock Piper to return 1 second of audio
     audio_samples = np.zeros(22050, dtype=np.int16)
-    mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+    audio_chunk = Mock()
+    audio_chunk.audio_int16_array = audio_samples
+    mock_piper_voice.synthesize.return_value = [audio_chunk]
 
     with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
@@ -705,7 +719,9 @@ async def test_get_state_returns_current_state(
 
         # During synthesis
         audio_samples = np.zeros(22050, dtype=np.int16)
-        mock_piper_voice.synthesize_stream_raw.return_value = [audio_samples]
+        audio_chunk = Mock()
+        audio_chunk.audio_int16_array = audio_samples
+        mock_piper_voice.synthesize.return_value = [audio_chunk]
 
         async def synthesize() -> None:
             async for _ in adapter.synthesize_stream(

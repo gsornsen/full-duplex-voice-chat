@@ -13,6 +13,7 @@ Key features:
 """
 
 import logging
+import struct
 from collections.abc import Callable
 from typing import Protocol
 
@@ -141,8 +142,24 @@ class VADProcessor:
                 f"got {len(frame)} bytes"
             )
 
+        # DEBUG: Calculate audio signal level to check if we have actual audio
+        audio_level = self._calculate_audio_level(frame)
+        is_silence_audio = audio_level < 100  # Threshold for "silent" audio
+
         # Detect speech in frame (webrtcvad.is_speech returns bool, type: ignore for mypy)
         is_speech: bool = bool(self._vad.is_speech(frame, self._config.sample_rate))
+
+        # DEBUG: Log every frame with detailed information
+        logger.info(
+            f"[VAD DEBUG] Frame #{self._frames_processed}: "
+            f"is_speech={is_speech}, "
+            f"audio_level={audio_level:.1f}, "
+            f"is_silent={is_silence_audio}, "
+            f"frame_size={len(frame)} bytes, "
+            f"state_is_speaking={self._is_speaking}, "
+            f"speech_frames={self._speech_frames}, "
+            f"silence_frames={self._silence_frames}"
+        )
 
         # Update frame counters
         self._frames_processed += 1
@@ -159,6 +176,24 @@ class VADProcessor:
 
         return is_speech
 
+    def _calculate_audio_level(self, frame: bytes) -> float:
+        """Calculate RMS audio level for debugging.
+
+        Args:
+            frame: Raw PCM audio frame (16-bit signed int, little endian)
+
+        Returns:
+            RMS audio level (0-32768 range for 16-bit audio)
+        """
+        # Unpack bytes as signed 16-bit integers
+        sample_count = len(frame) // 2
+        samples = struct.unpack(f"<{sample_count}h", frame)
+
+        # Calculate RMS
+        sum_squares = sum(sample * sample for sample in samples)
+        rms_value: float = float((sum_squares / sample_count) ** 0.5)
+        return rms_value
+
     def _update_state(self, is_speech: bool) -> None:
         """Update speech/silence state machine and fire events.
 
@@ -173,24 +208,34 @@ class VADProcessor:
                 if self._speech_start_time_ms is None:
                     # First speech frame detected
                     self._speech_start_time_ms = self._current_time_ms
+                    logger.info(
+                        f"[VAD DEBUG STATE] First speech frame detected "
+                        f"at {self._current_time_ms:.1f}ms"
+                    )
                 else:
                     # Check if we've accumulated enough speech
                     speech_duration = self._current_time_ms - self._speech_start_time_ms
+                    logger.debug(
+                        f"[VAD DEBUG STATE] Accumulating speech: "
+                        f"{speech_duration:.1f}ms / "
+                        f"{self._min_speech_duration_ms}ms required"
+                    )
                     if speech_duration >= self._min_speech_duration_ms:
                         # Confirmed speech start
                         self._is_speaking = True
                         if self.on_speech_start:
                             self.on_speech_start(self._speech_start_time_ms)
-                        logger.debug(
-                            f"Speech started at {self._speech_start_time_ms:.1f}ms "
+                        logger.info(
+                            f"[VAD DEBUG STATE] Speech started "
+                            f"at {self._speech_start_time_ms:.1f}ms "
                             f"(debounced over {speech_duration:.1f}ms)"
                         )
 
         else:  # silence
             # If we were tracking potential speech, reset
             if not self._is_speaking and self._speech_start_time_ms is not None:
-                logger.debug(
-                    f"Speech candidate discarded (too short): "
+                logger.info(
+                    f"[VAD DEBUG STATE] Speech candidate discarded (too short): "
                     f"{self._current_time_ms - self._speech_start_time_ms:.1f}ms"
                 )
                 self._speech_start_time_ms = None
@@ -198,13 +243,18 @@ class VADProcessor:
             # Transition: speech → silence
             if self._is_speaking and self._last_speech_time_ms is not None:
                 silence_duration = self._current_time_ms - self._last_speech_time_ms
+                logger.debug(
+                    f"[VAD DEBUG STATE] Accumulating silence: "
+                    f"{silence_duration:.1f}ms / "
+                    f"{self._min_silence_duration_ms}ms required"
+                )
                 if silence_duration >= self._min_silence_duration_ms:
                     # Confirmed speech end
                     self._is_speaking = False
                     if self.on_speech_end:
                         self.on_speech_end(self._last_speech_time_ms)
-                    logger.debug(
-                        f"Speech ended at {self._last_speech_time_ms:.1f}ms "
+                    logger.info(
+                        f"[VAD DEBUG STATE] Speech ended at {self._last_speech_time_ms:.1f}ms "
                         f"(debounced over {silence_duration:.1f}ms)"
                     )
                     self._speech_start_time_ms = None

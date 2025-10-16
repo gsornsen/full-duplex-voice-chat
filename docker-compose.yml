@@ -84,6 +84,10 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=devsecret1234567890abcdefghijklmn
+      - ASR_ENABLED=true
+      - ASR_ADAPTER=whisperx
+      - ASR_MODEL_SIZE=small
+      - ASR_DEVICE=auto
     depends_on:
       redis:
         condition: service_healthy

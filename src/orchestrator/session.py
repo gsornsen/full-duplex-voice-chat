@@ -26,7 +26,12 @@ class SessionState(Enum):
     - LISTENING → SPEAKING (on text received)
     - SPEAKING → LISTENING (on synthesis complete)
     - SPEAKING → BARGED_IN (on user interrupt, M3+)
+    - SPEAKING → WAITING_FOR_INPUT (on synthesis complete, M10+)
+    - LISTENING → WAITING_FOR_INPUT (when ready for next input, M10+)
     - BARGED_IN → LISTENING (on interrupt handled, M3+)
+    - BARGED_IN → WAITING_FOR_INPUT (on interrupt handled, M10+)
+    - WAITING_FOR_INPUT → LISTENING (on text received, M10+)
+    - WAITING_FOR_INPUT → SPEAKING (on text received and direct synthesis, M10+)
     - * → TERMINATED (on disconnect or error)
 
     States:
@@ -34,6 +39,7 @@ class SessionState(Enum):
     - LISTENING: Waiting for user speech/text input
     - SPEAKING: Playing TTS audio to user
     - BARGED_IN: User interrupted during playback (M3+)
+    - WAITING_FOR_INPUT: Idle between conversation turns, ready for next input (M10+)
     - TERMINATED: Session ended, no further transitions
     """
 
@@ -41,19 +47,34 @@ class SessionState(Enum):
     LISTENING = "listening"
     SPEAKING = "speaking"
     BARGED_IN = "barged_in"  # M3
+    WAITING_FOR_INPUT = "waiting_for_input"  # M10
     TERMINATED = "terminated"
 
 
 # Valid state transitions
 VALID_TRANSITIONS: dict[SessionState, set[SessionState]] = {
     SessionState.IDLE: {SessionState.LISTENING, SessionState.TERMINATED},
-    SessionState.LISTENING: {SessionState.SPEAKING, SessionState.TERMINATED},
+    SessionState.LISTENING: {
+        SessionState.SPEAKING,
+        SessionState.WAITING_FOR_INPUT,
+        SessionState.TERMINATED,
+    },
     SessionState.SPEAKING: {
         SessionState.LISTENING,
         SessionState.BARGED_IN,
+        SessionState.WAITING_FOR_INPUT,
         SessionState.TERMINATED,
     },
-    SessionState.BARGED_IN: {SessionState.LISTENING, SessionState.TERMINATED},
+    SessionState.BARGED_IN: {
+        SessionState.LISTENING,
+        SessionState.WAITING_FOR_INPUT,
+        SessionState.TERMINATED,
+    },
+    SessionState.WAITING_FOR_INPUT: {
+        SessionState.LISTENING,
+        SessionState.SPEAKING,
+        SessionState.TERMINATED,
+    },
     SessionState.TERMINATED: set(),  # Terminal state
 }
 

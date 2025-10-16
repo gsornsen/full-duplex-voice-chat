@@ -238,11 +238,12 @@ class PiperTTSAdapter:
         Returns:
             Audio samples as int16 numpy array at native sample rate
         """
-        # Piper's synthesize_stream_raw returns a generator of audio chunks
+        # Piper's synthesize() returns an iterator of AudioChunk objects
         audio_chunks: list[NDArray[np.int16]] = []
 
-        for audio_chunk in self.voice.synthesize_stream_raw(text):  # type: ignore[attr-defined]
-            audio_chunks.append(audio_chunk)
+        for audio_chunk in self.voice.synthesize(text):
+            # Extract int16 array from AudioChunk
+            audio_chunks.append(audio_chunk.audio_int16_array)
 
         # Concatenate all chunks
         if not audio_chunks:

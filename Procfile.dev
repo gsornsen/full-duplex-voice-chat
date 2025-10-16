@@ -1,0 +1,30 @@
+# Procfile.dev - Development services for Realtime Duplex Voice Chat
+# Usage: honcho start -f Procfile.dev
+# Or via Just: just dev
+
+# Redis - Service discovery and worker registry
+# NOTE: Commented out because Redis is already running in Docker (port 6379)
+# Uncomment only if you need a separate Redis instance for development
+# redis: docker run --rm --name redis-tts-dev -p 6379:6379 redis:7-alpine
+
+# LiveKit Server - WebRTC media server
+# Uses Docker container with dev config
+livekit: docker run --rm --name livekit-dev-honcho --stop-timeout 10 -p 7880:7880 -p 7881:7881 -p 7882:7882/udp -v $PWD/configs/livekit.yaml:/etc/livekit.yaml:ro livekit/livekit-server:latest --config /etc/livekit.yaml
+
+# Caddy - HTTPS/WSS reverse proxy
+# Provides SSL termination for frontend (8443) and LiveKit WebSocket (8444)
+# Requires: Caddyfile, voicechat.local+3.pem, voicechat.local+3-key.pem
+caddy: docker run --rm --name caddy-dev-honcho --stop-timeout 10 -p 8443:8443 -p 8444:8444 -p 80:80 -v $PWD/Caddyfile:/etc/caddy/Caddyfile:ro -v $PWD/voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro -v $PWD/voicechat.local+3-key.pem:/etc/caddy/voicechat.local+3-key.pem:ro --add-host host.docker.internal:host-gateway caddy:2-alpine
+
+# TTS Worker - Text-to-speech gRPC server
+# Using Piper adapter (CPU-based TTS, realistic speech output)
+# Note: First run downloads ~60MB model (~30s)
+tts: uv run python -u -m src.tts --adapter piper --default-model piper-en-us-lessac-medium --port 7001
+
+# Orchestrator - LiveKit Agent + WebSocket server (with VAD and ASR)
+# Handles session management, routing, barge-in control
+orchestrator: uv run python -u -m src.orchestrator.server --config configs/orchestrator.local.yaml
+
+# Web Client - Next.js development server (optional)
+# Comment out if not needed for backend development
+# web: cd src/client/web && npm run dev

@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import grpc
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from src.rpc.generated import tts_pb2, tts_pb2_grpc
 from src.tts.model_manager import ModelManager
@@ -587,8 +587,14 @@ async def start_worker(config: dict[str, Any]) -> None:
         - Graceful shutdown with 5 second timeout
     """
     # Extract configuration
-    worker_config = config.get("worker", {})
-    port = worker_config.get("grpc_port", 7001)
+    # Support both legacy flat structure and new nested structure
+    if "worker" in config:
+        # New nested structure
+        worker_config = config["worker"]
+        port = worker_config.get("grpc_port", 7001)
+    else:
+        # Legacy flat structure (from __main__.py)
+        port = config.get("port", 7001)
 
     mm_config = config.get("model_manager", {})
 

@@ -1,6 +1,6 @@
 # Development Guide
 
-**Last Updated**: 2025-10-09
+**Last Updated**: 2025-10-13
 
 This guide covers local development workflows, debugging techniques, testing strategies, and troubleshooting for the full-duplex voice chat system.
 
@@ -10,12 +10,13 @@ This guide covers local development workflows, debugging techniques, testing str
 
 1. [Development Setup](#development-setup)
 2. [Daily Development Workflow](#daily-development-workflow)
-3. [Testing Strategy](#testing-strategy)
-4. [Debugging Techniques](#debugging-techniques)
-5. [Common Development Tasks](#common-development-tasks)
-6. [Troubleshooting](#troubleshooting)
-7. [Code Quality Standards](#code-quality-standards)
-8. [Contributing Guidelines](#contributing-guidelines)
+3. [Log Management](#log-management)
+4. [Testing Strategy](#testing-strategy)
+5. [Debugging Techniques](#debugging-techniques)
+6. [Common Development Tasks](#common-development-tasks)
+7. [Troubleshooting](#troubleshooting)
+8. [Code Quality Standards](#code-quality-standards)
+9. [Contributing Guidelines](#contributing-guidelines)
 
 ---
 
@@ -50,7 +51,7 @@ cd full-duplex-voice-chat
 
 2. **Install dependencies**:
 ```bash
-# Install all dependencies including dev tools
+# Install all dependencies including dev tools (includes honcho process manager)
 uv sync --all-extras
 
 # Or minimal install
@@ -99,27 +100,127 @@ uv add torch torchvision torchaudio --index-url https://download.pytorch.org/whl
 
 ## Daily Development Workflow
 
-### Quick Start (Development Mode)
+### Quick Start - Parallel Service Startup (Recommended)
 
-Run the full stack locally for development:
+**Single command starts all services in parallel** - no 5-minute Docker build wait!
+
+```bash
+# Start all services with mock TTS adapter (fast startup)
+just dev
+```
+
+**What it does**:
+- Starts Redis (Docker container on port 6379)
+- Starts LiveKit (Docker container on ports 7880-7882)
+- Starts TTS Worker with mock adapter (Python process on port 7001)
+- Starts Orchestrator with VAD and ASR (Python process on port 8082)
+- **Automatically saves logs** to `logs/dev-sessions/dev-YYYYMMDD-HHMMSS.log`
+
+**Features**:
+- **Parallel startup**: ~10 seconds total (vs 5+ minutes for Docker build)
+- **Color-coded logs**: Each service has its own color in terminal output
+- **Graceful shutdown**: Single Ctrl+C stops all processes cleanly
+- **Hot-reload friendly**: Restart `just dev` quickly after code changes
+- **Automatic logging**: Every session creates a timestamped log file
+
+**Variants**:
+
+```bash
+# Start with Piper TTS adapter (CPU-based, real TTS)
+just dev-piper
+
+# Start with web client included (adds Next.js dev server on port 3000)
+just dev-web
+```
+
+**Access the demo**:
+- WebSocket endpoint: `ws://localhost:8082`
+- LiveKit WebRTC: `ws://localhost:7880`
+- Web client (if dev-web): `http://localhost:3000`
+- CLI client: `just cli`
+
+**How it works**:
+- Uses **Procfile** format (industry standard, Heroku-compatible)
+- Powered by **Honcho** process manager (Python-based, cross-platform)
+- Services defined in `Procfile.dev` at repository root
+- Single Ctrl+C sends SIGINT to all processes
+- Logs captured via `tee` (console output + file simultaneously)
+
+**Customizing services**:
+
+Edit `Procfile.dev` to customize service startup:
+```bash
+# Procfile.dev format:
+<service-name>: <shell-command>
+
+# Example: Change TTS adapter
+tts: uv run python -m src.tts.worker --adapter piper --default-model piper-en-us-lessac-medium
+```
+
+**Troubleshooting parallel startup**:
+
+1. **Port already in use**:
+```bash
+# Find process using port
+lsof -i :6379  # Redis
+lsof -i :7001  # TTS Worker
+lsof -i :7880  # LiveKit
+lsof -i :8082  # Orchestrator
+
+# Kill process
+kill -9 <PID>
+```
+
+2. **Docker containers conflict**:
+```bash
+# Remove existing containers
+docker stop redis-tts-dev livekit-dev
+docker rm redis-tts-dev livekit-dev
+```
+
+3. **Honcho not found**:
+```bash
+# Install honcho
+uv sync --all-extras
+# Or manually: uv pip install honcho
+```
+
+### Alternative - Individual Services (for debugging)
+
+Run services in separate terminals for fine-grained debugging:
 
 ```bash
 # Terminal 1: Start Redis
 just redis
 
-# Terminal 2: Start TTS worker (mock adapter for M0-M2)
+# Terminal 2: Start TTS worker (mock adapter)
 just run-tts-mock
 
 # Terminal 3: Start orchestrator
 just run-orch
 
 # Terminal 4: Run CLI client
-just cli HOST="ws://localhost:8080"
+just cli HOST="ws://localhost:8082"
 ```
 
-**Alternative - Docker Compose**:
+**Stopping services**:
 ```bash
-# Start everything with one command
+# Stop individual service: Ctrl+C in terminal
+# Stop Redis container: just redis-stop
+```
+
+**When to use this approach**:
+- Debugging specific service in isolation
+- Running profiling tools on single service (py-spy, nsys, etc.)
+- Need to restart single service frequently
+- Want separate log files per service
+
+### Alternative - Docker Compose (production-like testing)
+
+Use Docker Compose for full-stack testing with all production features:
+
+```bash
+# Start full stack (includes Caddy reverse proxy, TLS, etc.)
 docker compose up --build
 
 # Run in background
@@ -131,6 +232,15 @@ docker compose logs -f orchestrator
 # Stop everything
 docker compose down
 ```
+
+**Note**: Docker build takes ~5 minutes. Use `just dev` for faster iteration during development.
+
+**When to use Docker Compose**:
+- Testing production deployment configuration
+- Verifying TLS/HTTPS setup
+- Testing with production-like resource constraints
+- Multi-service integration testing
+- CI/CD pipeline validation
 
 ### Code-Edit-Test Cycle
 
@@ -166,11 +276,215 @@ git commit -m "feat(component): description of changes"
 
 Most components support auto-reload during development:
 
-- **Orchestrator**: Restart required for code changes
+- **Orchestrator**: Restart required for code changes (use `Ctrl+C` then `just dev`)
 - **TTS Workers**: Restart required for adapter changes
 - **Configuration**: Reload on file change (config.yaml)
+- **Web Client**: Hot-reload enabled (Next.js dev mode)
 
-**Tip**: Use tmux or screen to manage multiple terminals.
+**Tip**: Use tmux or screen to manage multiple terminals when not using `just dev`.
+
+---
+
+## Log Management
+
+All `just dev`, `just dev-piper`, and `just dev-web` commands automatically save rotating logs to timestamped files. This allows you to review past sessions, debug issues, and track system behavior over time.
+
+### Log Storage
+
+**Location**: `logs/dev-sessions/`
+
+**Filename format**:
+- `dev-YYYYMMDD-HHMMSS.log` (from `just dev`)
+- `dev-piper-YYYYMMDD-HHMMSS.log` (from `just dev-piper`)
+- `dev-web-YYYYMMDD-HHMMSS.log` (from `just dev-web`)
+
+**Example**:
+```
+logs/dev-sessions/
+├── dev-20251013-093045.log
+├── dev-20251013-101522.log
+├── dev-piper-20251013-143018.log
+└── dev-web-20251013-151203.log
+```
+
+### Log Features
+
+**Console + File Output**: Logs are written to both:
+- **Terminal** (live, color-coded output for real-time monitoring)
+- **Log file** (persistent, includes all ANSI color codes for full fidelity)
+
+**What's logged**:
+- Service startup messages (Redis, LiveKit, TTS Worker, Orchestrator)
+- Application logs (DEBUG, INFO, WARNING, ERROR levels)
+- Error messages and stack traces
+- Performance metrics and timing information
+- Network activity (WebSocket connections, gRPC calls)
+- VAD events (speech start/end detection)
+- ASR transcriptions
+
+**Color preservation**: ANSI color codes are preserved in log files. Use `less -R` or `cat` to view with colors.
+
+### Log Management Commands
+
+#### List Recent Logs
+
+View the 10 most recent log files with timestamps:
+
+```bash
+just logs-list
+```
+
+**Example output**:
+```
+Recent development session logs:
+--------------------------------
+logs/dev-sessions/dev-20251013-151203.log (Oct 13 15:12)
+logs/dev-sessions/dev-piper-20251013-143018.log (Oct 13 14:30)
+logs/dev-sessions/dev-20251013-101522.log (Oct 13 10:15)
+...
+```
+
+#### Tail Most Recent Log
+
+Follow the latest log file in real-time (useful for debugging after a session ends):
+
+```bash
+just logs-tail
+```
+
+This command:
+- Finds the most recent log file
+- Runs `tail -f` to follow it in real-time
+- Press `Ctrl+C` to stop
+
+#### View Specific Log
+
+Open a specific log file with pager (supports search, scrolling):
+
+```bash
+just logs-view <filename>
+```
+
+**Example**:
+```bash
+# View specific log
+just logs-view dev-20251013-093045.log
+
+# Inside less:
+# - Press '/' to search
+# - Press 'n' for next match
+# - Press 'q' to quit
+# - Arrow keys to scroll
+```
+
+If the file doesn't exist, the command shows available logs automatically.
+
+#### Clean Old Logs
+
+Remove old log files based on retention policy:
+
+```bash
+just logs-clean
+```
+
+**Retention policy**:
+- **Keep last 20 sessions** (most recent files)
+- **Delete files older than 7 days**
+- Whichever keeps MORE files
+
+**Example output**:
+```
+Cleaning old development session logs...
+Total log files: 35
+Keeping last 20 files, removing 15 old files...
+Deleted 3 log files older than 7 days.
+Remaining log files: 20
+```
+
+**When to clean**:
+- Weekly maintenance
+- Before long development sessions (to avoid clutter)
+- When disk space is limited
+
+### Log Analysis Tips
+
+**Search across all logs**:
+```bash
+# Find all ERROR messages
+grep -r "ERROR" logs/dev-sessions/
+
+# Find specific session ID
+grep -r "session_id=abc123" logs/dev-sessions/
+
+# Count occurrences
+grep -rc "VAD detected speech" logs/dev-sessions/ | sort -t: -k2 -nr
+```
+
+**Extract timing information**:
+```bash
+# Find slow requests
+grep "duration_ms" logs/dev-sessions/dev-20251013-*.log | awk '{if ($NF > 1000) print}'
+
+# Analyze FAL (First Audio Latency)
+grep "first_audio_latency" logs/dev-sessions/*.log | awk '{print $NF}'
+```
+
+**Debug specific service**:
+```bash
+# Filter by service prefix (honcho adds service name)
+grep "orchestrator" logs/dev-sessions/dev-latest.log
+grep "tts" logs/dev-sessions/dev-latest.log
+```
+
+**View logs with color**:
+```bash
+# Using less with color support
+less -R logs/dev-sessions/dev-20251013-093045.log
+
+# Or cat (no paging)
+cat logs/dev-sessions/dev-20251013-093045.log
+```
+
+### Log Retention Best Practices
+
+**For active development**:
+- Keep logs for at least 7 days
+- Run `just logs-clean` weekly
+- Review recent logs before filing bug reports
+
+**For long-term debugging**:
+- Archive important logs outside `logs/dev-sessions/`
+- Compress old logs: `gzip logs/dev-sessions/*.log`
+- Keep logs related to production incidents indefinitely
+
+**Disk space management**:
+- Average log size: 5-50 MB per session (depends on duration and verbosity)
+- 20 sessions ≈ 100-1000 MB
+- Monitor with: `du -sh logs/dev-sessions/`
+
+### Troubleshooting Logs
+
+**No logs directory**:
+```bash
+# Created automatically on first 'just dev' run
+# Or create manually:
+mkdir -p logs/dev-sessions
+```
+
+**Logs not being created**:
+- Check if `tee` command is available: `which tee`
+- Verify write permissions: `ls -ld logs/dev-sessions`
+- Check disk space: `df -h`
+
+**Log file too large**:
+- Reduce log verbosity: `export LOG_LEVEL=INFO` (instead of DEBUG)
+- Clean old logs: `just logs-clean`
+- Compress old logs: `gzip logs/dev-sessions/*.log`
+
+**Can't view logs with color**:
+- Use `less -R` instead of plain `less`
+- Or use `cat` for direct output
+- Terminal must support ANSI colors
 
 ---
 
@@ -352,6 +666,7 @@ logger.info(
 
 **Log locations**:
 - Console output (stdout/stderr)
+- Development session logs: `logs/dev-sessions/dev-YYYYMMDD-HHMMSS.log`
 - Docker logs: `docker compose logs -f orchestrator`
 - Test logs: pytest captures logs, use `-s` to see them
 
@@ -703,6 +1018,9 @@ sudo lsof -i :6379  # Redis
 
 3. **Check logs**:
 ```bash
+# Development session logs
+just logs-tail
+
 # Docker logs
 docker compose logs orchestrator
 docker compose logs tts-worker
@@ -735,13 +1053,26 @@ python -c "import torch; print(torch.cuda.is_available())"  # PyTorch sees GPU?
    - [Testing Guide](TESTING_GUIDE.md)
    - [CLAUDE.md](../CLAUDE.md)
 
-2. **Search existing issues** in the repository
+2. **Review recent logs**:
+```bash
+# List recent sessions
+just logs-list
 
-3. **Ask for help**:
+# View specific log
+just logs-view <filename>
+
+# Search for errors
+grep -r "ERROR" logs/dev-sessions/
+```
+
+3. **Search existing issues** in the repository
+
+4. **Ask for help**:
    - Include error messages and stack traces
    - Provide steps to reproduce
    - Share relevant configuration
    - Mention OS, Python version, CUDA version
+   - Attach relevant log files from `logs/dev-sessions/`
 
 ---
 
