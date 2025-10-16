@@ -405,7 +405,7 @@ class OrchestratorConfig(BaseModel):
         """
         import os
 
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")

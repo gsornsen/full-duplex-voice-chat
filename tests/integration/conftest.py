@@ -187,7 +187,7 @@ async def redis_container(docker_available: bool) -> AsyncIterator[str]:
         pytest.skip(f"Failed to start Redis container: {e}")
 
     # Wait for Redis to be ready
-    redis = aioredis.from_url(redis_url)  # type: ignore[no-untyped-call]
+    redis = aioredis.from_url(redis_url)
     for attempt in range(30):
         try:
             await redis.ping()
@@ -435,7 +435,7 @@ async def orchestrator_server(
     # Write config to temporary file
     tmp_path = tmp_path_factory.mktemp("config")
     config_path = tmp_path / "orchestrator_config.yaml"
-    import yaml  # type: ignore[import-untyped]
+    import yaml
     with open(config_path, 'w') as f:
         yaml.dump(config.model_dump(mode='json'), f)
 

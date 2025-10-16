@@ -7,7 +7,7 @@ This ensures all config errors are caught at load time rather than runtime.
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import BaseModel, Field, field_validator
 
 

@@ -562,7 +562,7 @@ async def handle_session(
                     "asr_enabled": config.asr.enabled,
                     "session_state": session_manager.state.name,
                     "audio_buffer_size": (
-                        len(session_manager.audio_buffer)
+                        session_manager.audio_buffer.qsize()
                         if hasattr(session_manager, "audio_buffer")
                         else 0
                     ),
