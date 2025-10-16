@@ -45,6 +45,7 @@ dev = [
     "pytest-timeout>=2.2.0",
     "pytest-forked>=1.6.0",
     "pytest-xdist>=3.5.0",
+    "pytest-cov>=4.1.0",
     "mypy>=1.9.0",
     "ruff>=0.3.0",
     "types-pyyaml>=6.0.0",

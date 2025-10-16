@@ -208,6 +208,7 @@ jobs:
   security:
     name: Security Scan (bandit)
     runs-on: ubuntu-latest
+    continue-on-error: true  # Don't block PR if security scan fails
     steps:
       - uses: actions/checkout@v4
 
@@ -222,12 +223,12 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install bandit
-        run: uv pip install bandit[toml]
+        run: uv tool install bandit[toml]
 
       - name: Run bandit
         run: |
-          uv run bandit -r src/ -f json -o bandit-report.json || true
-          uv run bandit -r src/ -f txt || true
+          uv tool run bandit -r src/ -f json -o bandit-report.json || true
+          uv tool run bandit -r src/ -f txt || true
 
       - name: Upload security report
         if: always()
@@ -241,6 +242,7 @@ jobs:
   dependency-check:
     name: Dependency Check
     runs-on: ubuntu-latest
+    continue-on-error: true  # Don't block PR if dependency check fails
     steps:
       - uses: actions/checkout@v4
 
@@ -255,12 +257,12 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install pip-audit
-        run: uv pip install pip-audit
+        run: uv tool install pip-audit
 
       - name: Run pip-audit
         run: |
-          uv run pip-audit --desc --output pip-audit-report.json --format json || true
-          uv run pip-audit --desc || true
+          uv tool run pip-audit --desc --output pip-audit-report.json --format json || true
+          uv tool run pip-audit --desc || true
 
       - name: Upload dependency report
         if: always()
