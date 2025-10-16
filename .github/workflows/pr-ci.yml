@@ -84,6 +84,11 @@ jobs:
   test:
     name: Test (pytest - full suite)
     runs-on: ubuntu-latest
+    permissions:
+      # Public new comments on PRs and update existing comments created
+      # by this job
+      pull-requests: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
