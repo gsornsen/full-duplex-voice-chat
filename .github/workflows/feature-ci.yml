@@ -1,0 +1,370 @@
+name: Feature CI
+
+# Fast feedback CI for feature branches
+# - Smart test selection based on changed files
+# - Aggressive dependency caching
+# - Runs only on feature branches (not main, not PRs)
+# - Provides fast feedback (~3-5 min vs 10-15 min)
+# - Status is informational (non-blocking)
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'feat/**'
+      - 'fix/**'
+      - 'hotfix/**'
+      - 'bugfix/**'
+      - 'chore/**'
+      - 'refactor/**'
+      - 'perf/**'
+      - 'test/**'
+      - 'ci/**'
+      - 'build/**'
+      - 'docs/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.dockerignore'
+
+env:
+  PYTHON_VERSION: "3.13"
+  UV_VERSION: "latest"
+
+jobs:
+  # Determine which test suites to run based on changed files
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      run_lint: ${{ steps.changes.outputs.run_lint }}
+      run_typecheck: ${{ steps.changes.outputs.run_typecheck }}
+      run_orchestrator_tests: ${{ steps.changes.outputs.run_orchestrator_tests }}
+      run_tts_tests: ${{ steps.changes.outputs.run_tts_tests }}
+      run_asr_tests: ${{ steps.changes.outputs.run_asr_tests }}
+      run_integration_tests: ${{ steps.changes.outputs.run_integration_tests }}
+      run_all_tests: ${{ steps.changes.outputs.run_all_tests }}
+      skip_all: ${{ steps.changes.outputs.skip_all }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to detect changes
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          # Get list of changed files
+          if [ "${{ github.event_name }}" == "push" ]; then
+            if [ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]; then
+              # First push to branch - compare with main
+              CHANGED_FILES=$(git diff --name-only origin/main...HEAD || echo "")
+            else
+              # Regular push - compare with previous commit
+              CHANGED_FILES=$(git diff --name-only ${{ github.event.before }}...HEAD || echo "")
+            fi
+          else
+            # Fallback: compare with main
+            CHANGED_FILES=$(git diff --name-only origin/main...HEAD || echo "")
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Check if docs-only changes
+          SKIP_ALL="false"
+          if echo "$CHANGED_FILES" | grep -qvE '\.(md|txt|rst)$|^docs/|^LICENSE|^\.gitignore'; then
+            SKIP_ALL="false"
+          else
+            SKIP_ALL="true"
+            echo "Only documentation files changed - skipping all checks"
+          fi
+
+          # Default: run lint and typecheck for any code changes
+          RUN_LINT="true"
+          RUN_TYPECHECK="true"
+
+          # Determine which test suites to run
+          RUN_ORCHESTRATOR_TESTS="false"
+          RUN_TTS_TESTS="false"
+          RUN_ASR_TESTS="false"
+          RUN_INTEGRATION_TESTS="false"
+          RUN_ALL_TESTS="false"
+
+          # Check for changes that require full test suite
+          if echo "$CHANGED_FILES" | grep -qE '^pyproject\.toml$|^uv\.lock$|^\.github/workflows/|^configs/'; then
+            echo "Dependency or config changes detected - running full test suite"
+            RUN_ALL_TESTS="true"
+            RUN_ORCHESTRATOR_TESTS="true"
+            RUN_TTS_TESTS="true"
+            RUN_ASR_TESTS="true"
+            RUN_INTEGRATION_TESTS="true"
+          fi
+
+          # Check for orchestrator changes
+          if echo "$CHANGED_FILES" | grep -qE '^src/orchestrator/'; then
+            echo "Orchestrator changes detected"
+            RUN_ORCHESTRATOR_TESTS="true"
+            RUN_INTEGRATION_TESTS="true"
+          fi
+
+          # Check for TTS changes
+          if echo "$CHANGED_FILES" | grep -qE '^src/tts/'; then
+            echo "TTS changes detected"
+            RUN_TTS_TESTS="true"
+            RUN_INTEGRATION_TESTS="true"
+          fi
+
+          # Check for ASR changes
+          if echo "$CHANGED_FILES" | grep -qE '^src/asr/'; then
+            echo "ASR changes detected"
+            RUN_ASR_TESTS="true"
+            RUN_INTEGRATION_TESTS="true"
+          fi
+
+          # Check for RPC/protobuf changes
+          if echo "$CHANGED_FILES" | grep -qE '^src/rpc/|\.proto$'; then
+            echo "RPC/protobuf changes detected - running integration tests"
+            RUN_INTEGRATION_TESTS="true"
+          fi
+
+          # Check for test file changes
+          if echo "$CHANGED_FILES" | grep -qE '^tests/'; then
+            echo "Test file changes detected - running affected tests"
+            if echo "$CHANGED_FILES" | grep -qE '^tests/unit/orchestrator/'; then
+              RUN_ORCHESTRATOR_TESTS="true"
+            fi
+            if echo "$CHANGED_FILES" | grep -qE '^tests/unit/tts/'; then
+              RUN_TTS_TESTS="true"
+            fi
+            if echo "$CHANGED_FILES" | grep -qE '^tests/unit/asr/'; then
+              RUN_ASR_TESTS="true"
+            fi
+            if echo "$CHANGED_FILES" | grep -qE '^tests/integration/'; then
+              RUN_INTEGRATION_TESTS="true"
+            fi
+          fi
+
+          # If no specific test suite selected, run all tests
+          if [ "$RUN_ORCHESTRATOR_TESTS" == "false" ] && \
+             [ "$RUN_TTS_TESTS" == "false" ] && \
+             [ "$RUN_ASR_TESTS" == "false" ] && \
+             [ "$RUN_INTEGRATION_TESTS" == "false" ] && \
+             [ "$SKIP_ALL" == "false" ]; then
+            echo "No specific test suite matched - running all tests"
+            RUN_ALL_TESTS="true"
+          fi
+
+          echo "run_lint=$RUN_LINT" >> $GITHUB_OUTPUT
+          echo "run_typecheck=$RUN_TYPECHECK" >> $GITHUB_OUTPUT
+          echo "run_orchestrator_tests=$RUN_ORCHESTRATOR_TESTS" >> $GITHUB_OUTPUT
+          echo "run_tts_tests=$RUN_TTS_TESTS" >> $GITHUB_OUTPUT
+          echo "run_asr_tests=$RUN_ASR_TESTS" >> $GITHUB_OUTPUT
+          echo "run_integration_tests=$RUN_INTEGRATION_TESTS" >> $GITHUB_OUTPUT
+          echo "run_all_tests=$RUN_ALL_TESTS" >> $GITHUB_OUTPUT
+          echo "skip_all=$SKIP_ALL" >> $GITHUB_OUTPUT
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.skip_all != 'true' && needs.detect-changes.outputs.run_lint == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run ruff
+        run: uv run ruff check src/ tests/
+
+  typecheck:
+    name: Type Check (mypy)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.skip_all != 'true' && needs.detect-changes.outputs.run_typecheck == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Cache protobuf stubs
+        uses: actions/cache@v4
+        with:
+          path: src/rpc/generated
+          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
+
+      - name: Generate protobuf stubs
+        run: |
+          uv run python -m grpc_tools.protoc \
+            -I src/rpc \
+            --python_out=src/rpc/generated \
+            --grpc_python_out=src/rpc/generated \
+            --pyi_out=src/rpc/generated \
+            src/rpc/tts.proto
+
+      - name: Fix protobuf imports
+        run: |
+          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+
+      - name: Run mypy
+        run: uv run mypy src/ tests/
+
+  test:
+    name: Test (pytest - selective)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.skip_all != 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OS dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Cache protobuf stubs
+        uses: actions/cache@v4
+        with:
+          path: src/rpc/generated
+          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
+
+      - name: Generate protobuf stubs
+        run: |
+          uv run python -m grpc_tools.protoc \
+            -I src/rpc \
+            --python_out=src/rpc/generated \
+            --grpc_python_out=src/rpc/generated \
+            --pyi_out=src/rpc/generated \
+            src/rpc/tts.proto
+
+      - name: Fix protobuf imports
+        run: |
+          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+
+      - name: Run selected tests
+        run: |
+          # Determine which tests to run based on change detection
+          TEST_PATHS=""
+
+          if [ "${{ needs.detect-changes.outputs.run_all_tests }}" == "true" ]; then
+            echo "Running full test suite"
+            TEST_PATHS="tests/"
+          else
+            if [ "${{ needs.detect-changes.outputs.run_orchestrator_tests }}" == "true" ]; then
+              echo "Running orchestrator tests"
+              TEST_PATHS="$TEST_PATHS tests/unit/orchestrator/"
+            fi
+
+            if [ "${{ needs.detect-changes.outputs.run_tts_tests }}" == "true" ]; then
+              echo "Running TTS tests"
+              TEST_PATHS="$TEST_PATHS tests/unit/tts/"
+            fi
+
+            if [ "${{ needs.detect-changes.outputs.run_asr_tests }}" == "true" ]; then
+              echo "Running ASR tests"
+              TEST_PATHS="$TEST_PATHS tests/unit/asr/"
+            fi
+
+            if [ "${{ needs.detect-changes.outputs.run_integration_tests }}" == "true" ]; then
+              echo "Running integration tests"
+              TEST_PATHS="$TEST_PATHS tests/integration/"
+            fi
+
+            # If no specific tests selected, run all unit tests (default fallback)
+            if [ -z "$TEST_PATHS" ]; then
+              echo "No specific tests selected - running all unit tests"
+              TEST_PATHS="tests/unit/"
+            fi
+          fi
+
+          echo "Test paths: $TEST_PATHS"
+          uv run pytest $TEST_PATHS -v -m "not grpc" --tb=short
+        env:
+          GRPC_TESTS_ENABLED: "0"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-feature-ci
+          path: |
+            .pytest_cache/
+            test-results.xml
+          retention-days: 7
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint, typecheck, test]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## Feature CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Change Detection:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Skip All: ${{ needs.detect-changes.outputs.skip_all }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Lint: ${{ needs.detect-changes.outputs.run_lint }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Typecheck: ${{ needs.detect-changes.outputs.run_typecheck }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Orchestrator Tests: ${{ needs.detect-changes.outputs.run_orchestrator_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run TTS Tests: ${{ needs.detect-changes.outputs.run_tts_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run ASR Tests: ${{ needs.detect-changes.outputs.run_asr_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Integration Tests: ${{ needs.detect-changes.outputs.run_integration_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run All Tests: ${{ needs.detect-changes.outputs.run_all_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Job Results:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Typecheck: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Test: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if any job failed
+          if [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.typecheck.result }}" == "failure" ] || \
+             [ "${{ needs.test.result }}" == "failure" ]; then
+            echo "❌ **Status: FAILED** - Some checks did not pass" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Note: Feature CI failures are informational only and do not block pushes." >> $GITHUB_STEP_SUMMARY
+            echo "PR CI will run the full test suite when you create a pull request." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ needs.detect-changes.outputs.skip_all }}" == "true" ]; then
+            echo "⏭️ **Status: SKIPPED** - Only documentation changes detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Status: PASSED** - All checks passed!" >> $GITHUB_STEP_SUMMARY
+          fi

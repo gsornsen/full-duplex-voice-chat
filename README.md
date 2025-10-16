@@ -4,9 +4,12 @@ A production-ready realtime speech-to-speech system enabling low-latency convers
 
 **Current Status**: M0-M10 Complete - See [Current Status](docs/CURRENT_STATUS.md)
 
-[![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)]()
-[![Python Version](https://img.shields.io/badge/python-3.13-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+[![PR CI](https://github.com/gsornsen/full-duplex-voice-chat/actions/workflows/pr-ci.yml/badge.svg)](https://github.com/gsornsen/full-duplex-voice-chat/actions/workflows/pr-ci.yml)
+[![Feature CI](https://github.com/gsornsen/full-duplex-voice-chat/actions/workflows/feature-ci.yml/badge.svg)](https://github.com/gsornsen/full-duplex-voice-chat/actions/workflows/feature-ci.yml)
+[![codecov](https://codecov.io/gh/gsornsen/full-duplex-voice-chat/branch/main/graph/badge.svg)](https://codecov.io/gh/gsornsen/full-duplex-voice-chat)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
