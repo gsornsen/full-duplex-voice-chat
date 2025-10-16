@@ -226,6 +226,11 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - ✅ Real-time transcription with RTF < 0.1 (GPU)
 - ✅ Full speech↔speech pipeline ready (ASR→LLM→TTS)
 - ✅ CPU/GPU paths validated with auto-optimization
+- ✅ **M10 Polish (Tasks 4 & 7)**: Comprehensive testing complete
+  - ✅ Adaptive noise gate (RMSBuffer): 31 unit tests passing
+  - ✅ Session timeout validation: 18 unit tests passing
+  - ✅ Multi-turn conversation flow: 22 integration tests passing
+  - ✅ Total: 71 new tests (655 total project tests)
 
 **M11: Observability & Profiling**:
 - Structured JSON logging
@@ -540,7 +545,9 @@ CLI Client
 - ✅ 15/15 M4 model lifecycle integration tests passing (100%)
 - ✅ 25/25 M5 Piper adapter unit tests passing (100%)
 - ✅ 7/12 M5 Piper integration tests passing (58%, 5 complex mocking edge cases)
-- ✅ 384+ unit tests passing, 391+ total tests (exceeds 113+ target)
+- ✅ 128/128 M10 Whisper ASR tests passing (100%)
+- ✅ 71/71 M10 Polish tests passing (100%) - Tasks 4 & 7
+- ✅ 655 total tests passing (M0-M10 + Polish)
 - ✅ 6/8 full pipeline tests passing (75%, 2 timeouts under investigation)
 - ✅ <50ms control command response time
 - ✅ <50ms VAD barge-in pause latency (p95)
@@ -593,5 +600,5 @@ CLI Client
 ---
 
 **Maintained by**: Multi-Agent Documentation Team
-**Last Review**: 2025-10-10
+**Last Review**: 2025-10-12
 **Next Review**: After M6 completion

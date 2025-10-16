@@ -14,12 +14,12 @@ import type { AppConfig } from '@/lib/types';
 const MotionWelcome = motion.create(Welcome);
 const MotionSessionView = motion.create(SessionView);
 
-// Audio constraints to disable browser AGC (Auto Gain Control)
-// This prevents the browser from over-attenuating the microphone audio
+// Audio constraints - enable echo cancellation and noise suppression
+// to prevent agent voice feedback and filter background noise
 const AUDIO_CONSTRAINTS = {
-  autoGainControl: false,
-  echoCancellation: false,
-  noiseSuppression: false,
+  autoGainControl: false,  // Keep disabled for natural voice dynamics
+  echoCancellation: true,  // ENABLE to prevent agent voice from being picked up
+  noiseSuppression: true,  // ENABLE to filter background noise
   sampleRate: 48000,
   channelCount: 1,
 };
@@ -37,9 +37,9 @@ export function App({ appConfig }: AppProps) {
         dynacast: true,
         // Audio defaults applied to all local audio tracks
         audioCaptureDefaults: {
-          autoGainControl: false, // DISABLE AGC
-          echoCancellation: false, // DISABLE echo cancellation
-          noiseSuppression: false, // DISABLE noise suppression
+          autoGainControl: false, // Keep disabled for natural dynamics
+          echoCancellation: true, // ENABLE to prevent feedback loops
+          noiseSuppression: true, // ENABLE to filter background noise
           channelCount: 1, // Mono audio
           sampleRate: 48000, // Match server expectation
         },

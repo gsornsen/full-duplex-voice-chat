@@ -247,11 +247,31 @@ class OrchestratorServer:
             session_manager: Session manager for sending responses
             worker_client: TTS worker client for synthesis
         """
-        logger.debug(f"Speech ended for session {session_id}")
+        logger.critical(
+            "[ASR PIPELINE] on_vad_speech_end called",
+            extra={
+                "session_id": session_id,
+                "asr_adapter_available": self.asr_adapter is not None,
+                "session_in_audio_buffers": session_id in self.audio_buffers,
+            }
+        )
 
         # Transcribe buffered audio if ASR enabled
         if self.asr_adapter and session_id in self.audio_buffers:
+            logger.critical(
+                "[ASR PIPELINE] Calling _transcribe_and_synthesize",
+                extra={"session_id": session_id}
+            )
             await self._transcribe_and_synthesize(session_id, session_manager, worker_client)
+        else:
+            logger.critical(
+                "[ASR PIPELINE] NOT transcribing - conditions not met",
+                extra={
+                    "session_id": session_id,
+                    "asr_adapter": self.asr_adapter is not None,
+                    "in_buffers": session_id in self.audio_buffers,
+                }
+            )
 
     async def _transcribe_and_synthesize(
         self,
@@ -267,25 +287,50 @@ class OrchestratorServer:
             worker_client: TTS worker client for synthesis
         """
         try:
+            logger.critical(
+                "[ASR PIPELINE] _transcribe_and_synthesize entered",
+                extra={"session_id": session_id}
+            )
+
             # Get buffered audio
             audio_buffer = self.audio_buffers.get(session_id)
             if not audio_buffer or await audio_buffer.is_empty():
-                logger.debug(f"No audio to transcribe for session {session_id}")
+                logger.critical(
+                    "[ASR PIPELINE] No audio to transcribe - buffer empty or missing",
+                    extra={
+                        "session_id": session_id,
+                        "buffer_exists": audio_buffer is not None,
+                    }
+                )
                 return
 
             audio_bytes = await audio_buffer.get_audio()
             duration_ms = audio_buffer.duration_ms()
 
-            logger.info(
-                f"Transcribing {duration_ms}ms of audio for session {session_id}"
+            logger.critical(
+                "[ASR PIPELINE] Starting transcription",
+                extra={
+                    "session_id": session_id,
+                    "audio_duration_ms": duration_ms,
+                    "audio_bytes": len(audio_bytes),
+                }
             )
 
             # Transcribe audio (audio is already at 16kHz from buffering)
             if not self.asr_adapter:
-                logger.warning("ASR adapter not available")
+                logger.critical("[ASR PIPELINE] ASR adapter not available!")
                 return
 
+            logger.critical("[ASR PIPELINE] Calling asr_adapter.transcribe()")
             result = await self.asr_adapter.transcribe(audio_bytes, sample_rate=16000)
+            logger.critical(
+                "[ASR PIPELINE] Transcription completed",
+                extra={
+                    "session_id": session_id,
+                    "text": result.text[:100] + "..." if len(result.text) > 100 else result.text,
+                    "confidence": result.confidence,
+                }
+            )
 
             if not result.text.strip():
                 logger.warning(
@@ -508,8 +553,24 @@ async def handle_session(
 
         def on_speech_end(timestamp_ms: float) -> None:
             """Handle VAD silence detection (resume trigger or ASR transcribe)."""
+            # CRITICAL LOGGING: Track speech end events for debugging
+            logger.critical(
+                "[ASR TRIGGER] Speech ended, firing on_speech_end handler",
+                extra={
+                    "session_id": session_id,
+                    "timestamp_ms": timestamp_ms,
+                    "asr_enabled": config.asr.enabled,
+                    "session_state": session_manager.state.name,
+                    "audio_buffer_size": len(session_manager.audio_buffer) if hasattr(session_manager, 'audio_buffer') else 0,
+                },
+            )
+
             # If ASR enabled, transcribe buffered audio
             if config.asr.enabled:
+                logger.critical(
+                    "[ASR TRIGGER] Triggering ASR transcription task",
+                    extra={"session_id": session_id}
+                )
                 asyncio.create_task(
                     orchestrator.on_vad_speech_end(session_id, session_manager, worker_client)
                 )

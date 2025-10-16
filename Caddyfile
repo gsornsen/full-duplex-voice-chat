@@ -52,9 +52,9 @@ https://voicechat.local:8444 {
     # Use mkcert-generated trusted certificate
     tls /etc/caddy/voicechat.local+3.pem /etc/caddy/voicechat.local+3-key.pem
 
-    # Proxy to LiveKit server in Docker
-    # LiveKit is on the same Docker network, accessible via service name
-    reverse_proxy livekit:7880 {
+    # Proxy to LiveKit server
+    # Use host.docker.internal to reach host machine from Docker (works for both Docker Compose and local dev)
+    reverse_proxy host.docker.internal:7880 {
         # WebSocket upgrade headers
         header_up Upgrade {http.request.header.Upgrade}
         header_up Connection {http.request.header.Connection}
