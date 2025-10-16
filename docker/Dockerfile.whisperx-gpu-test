@@ -1,0 +1,43 @@
+# Dockerfile for WhisperX GPU testing in WSL2
+# Tests if Docker container with NVIDIA runtime can use GPU better than native WSL2
+# Using CUDA 13.0 to match host driver version (CUDA 13.0)
+#
+# Build: docker build -f docker/Dockerfile.whisperx-gpu-test -t whisperx-gpu-test .
+# Run:   docker run --rm --gpus all whisperx-gpu-test
+
+FROM nvidia/cuda:13.0.0-cudnn-devel-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    git \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip
+
+# Install PyTorch with CUDA 12.x support (CUDA 13.0 is backward compatible with 12.x)
+# Note: PyTorch doesn't have cu130 builds yet, but cu124 works with CUDA 13.0 driver
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Install WhisperX dependencies
+RUN pip install faster-whisper==1.1.0
+RUN pip install ctranslate2==4.6.0
+
+# Copy test script
+COPY scripts/test_whisperx_gpu.py /app/test_whisperx_gpu.py
+
+WORKDIR /app
+
+# Default command: run GPU test
+CMD ["python", "test_whisperx_gpu.py"]

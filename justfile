@@ -7,6 +7,20 @@ default:
 # Quality & CI
 # ------------
 
+# Check CUDA/cuDNN compatibility before runtime
+check-cuda:
+    uv run python scripts/check_cuda_compatibility.py
+
+# Test WhisperX GPU in Docker container (WSL2 compatibility test)
+test-whisperx-gpu:
+    #!/usr/bin/env bash
+    set -e
+    echo "Building WhisperX GPU test container..."
+    docker build -f docker/Dockerfile.whisperx-gpu-test -t whisperx-gpu-test .
+    echo ""
+    echo "Running GPU benchmark in container..."
+    docker run --rm --gpus all whisperx-gpu-test
+
 # Run ruff linting
 lint:
     uv run ruff check src/ tests/

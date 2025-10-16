@@ -313,6 +313,208 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed command usage.
 
 ---
 
+## Network Ports Reference
+
+### Overview
+
+The system uses multiple ports across different deployment modes. Here's a comprehensive reference:
+
+| Service | Port | Protocol | Purpose | Deployment |
+|---------|------|----------|---------|------------|
+| **Orchestrator (WebSocket)** | 8080 | TCP/WS | WebSocket fallback transport | Bare metal, Docker |
+| **Orchestrator (WebSocket)** | 8082 | TCP/WS | Local development (alternate port) | Bare metal (local config) |
+| **LiveKit Server** | 7880 | TCP/WS | WebRTC signaling, room management | Bare metal, Docker |
+| **LiveKit RTC (TCP)** | 7881 | TCP | WebRTC TCP fallback | Bare metal, Docker |
+| **LiveKit RTC (UDP)** | 50000-60000 | UDP | WebRTC media streams | Bare metal (full range) |
+| **LiveKit RTC (UDP)** | 50000-50099 | UDP | WebRTC media streams (subset) | Docker (limited range) |
+| **LiveKit TURN (UDP)** | 7882 | UDP | TURN relay server | Bare metal, Docker |
+| **TTS Worker (gRPC)** | 7001 | TCP/gRPC | TTS synthesis service | Bare metal, Docker |
+| **Redis** | 6379 | TCP | Service discovery, registry | Bare metal, Docker |
+| **Prometheus (Metrics)** | 9090 | TCP/HTTP | Worker metrics (planned) | Bare metal, Docker |
+| **Caddy (HTTPS)** | 8443 | TCP/HTTPS | Web client reverse proxy | Docker, Local network |
+| **Caddy (WSS)** | 8444 | TCP/WSS | LiveKit WebSocket secure proxy | Docker, Local network |
+| **Web Client (Dev)** | 3000 | TCP/HTTP | Next.js development server | Bare metal |
+
+### Port Configuration by Deployment Mode
+
+#### Bare Metal (Local Development)
+
+**Orchestrator** (`configs/orchestrator.local.yaml`):
+- WebSocket: `0.0.0.0:8082`
+- LiveKit URL: `ws://localhost:7880`
+- Redis: `redis://localhost:6379`
+- TTS Worker: `grpc://localhost:7001`
+
+**TTS Worker** (`configs/worker.yaml`):
+- gRPC: `0.0.0.0:7001`
+- Redis: `redis://localhost:6379`
+- Prometheus: `0.0.0.0:9090` (planned)
+
+**LiveKit** (`configs/livekit.yaml`):
+- HTTP/WS: `0.0.0.0:7880`
+- RTC TCP: `7881`
+- RTC UDP: `50000-60000`
+- TURN UDP: `7882`
+
+**Commands**:
+```bash
+# Start services on bare metal
+just redis          # Redis on 6379
+# LiveKit starts automatically with just dev-agent-piper
+just run-tts-mock   # TTS worker on 7001
+just run-orch       # Orchestrator on 8082 (local) or 8080 (standard)
+just cli            # CLI client connects to ws://localhost:8082
+```
+
+#### Docker Compose (Production)
+
+**Orchestrator** (`configs/orchestrator.docker.yaml`):
+- WebSocket: `0.0.0.0:8080` (mapped to `8080:8080`)
+- LiveKit URL: `http://livekit:7880` (internal Docker network)
+- Redis: `redis://redis:6379` (internal Docker network)
+- TTS Worker: `grpc://tts0:7001` (internal Docker network)
+
+**Port Mappings** (`docker-compose.yml`):
+```yaml
+services:
+  redis:
+    # No external port mapping (internal only)
+
+  livekit:
+    ports:
+      - "7880:7880"           # WebRTC signaling
+      - "7881:7881"           # RTC TCP fallback
+      - "50000-50099:50000-50099/udp"  # RTC UDP (subset)
+
+  caddy:
+    ports:
+      - "8443:8443"           # HTTPS web client
+      - "8444:8444"           # WSS LiveKit proxy
+
+  orchestrator:
+    ports:
+      - "8080:8080"           # WebSocket fallback
+
+  tts0:
+    # No external port mapping (internal gRPC only)
+```
+
+**Commands**:
+```bash
+# Start full stack
+docker compose up --build
+
+# Access points
+https://localhost:8443          # Web client (via Caddy HTTPS)
+wss://localhost:8444            # LiveKit (via Caddy WSS)
+ws://localhost:8080             # WebSocket fallback (direct)
+http://localhost:8080/health    # Health check
+```
+
+#### Hybrid Mode (Bare Metal + Docker)
+
+You can run some services in Docker and others on bare metal:
+
+**Option 1: Docker Infrastructure + Bare Metal Workers**
+```bash
+# Start infrastructure in Docker
+docker compose up -d redis livekit caddy
+
+# Run workers and orchestrator on bare metal
+just run-tts-mock   # Port 7001
+just run-orch       # Port 8082 (connects to Docker Redis/LiveKit)
+```
+
+**Option 2: Docker Workers + Bare Metal Orchestrator**
+```bash
+# Start workers in Docker
+docker compose up -d redis tts0
+
+# Run orchestrator on bare metal (for debugging)
+just run-orch       # Port 8082 (connects to Docker services)
+```
+
+### Firewall Configuration
+
+#### Local Development (Single Machine)
+
+No firewall configuration needed - all services on `localhost`.
+
+#### Local Network Access (Multiple Machines)
+
+**Allow incoming connections** for:
+- `8443/tcp` - HTTPS web client (Caddy)
+- `8444/tcp` - WSS LiveKit proxy (Caddy)
+- `7880/tcp` - LiveKit WebRTC signaling
+- `50000-50099/udp` - WebRTC media streams (Docker)
+- `50000-60000/udp` - WebRTC media streams (bare metal)
+
+**Linux (ufw)**:
+```bash
+sudo ufw allow 8443/tcp   # Caddy HTTPS
+sudo ufw allow 8444/tcp   # Caddy WSS
+sudo ufw allow 7880/tcp   # LiveKit signaling
+sudo ufw allow 50000:60000/udp  # WebRTC media
+```
+
+**Windows (PowerShell)**:
+```powershell
+New-NetFirewallRule -DisplayName "Voice Chat HTTPS" -Direction Inbound -LocalPort 8443 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "Voice Chat WSS" -Direction Inbound -LocalPort 8444 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "LiveKit Signaling" -Direction Inbound -LocalPort 7880 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "WebRTC Media" -Direction Inbound -LocalPort 50000-60000 -Protocol UDP -Action Allow
+```
+
+#### Production Deployment
+
+**Exposed Ports** (via reverse proxy):
+- `443/tcp` - HTTPS (Caddy → web client + LiveKit WSS)
+- `50000-60000/udp` - WebRTC media (direct to LiveKit)
+
+**Internal Ports** (Docker network only):
+- `6379/tcp` - Redis
+- `7001/tcp` - TTS worker gRPC
+- `8080/tcp` - Orchestrator WebSocket
+- `9090/tcp` - Prometheus metrics
+
+### Port Conflict Resolution
+
+**Common conflicts**:
+
+1. **Port 6379 (Redis)**
+   - Conflict: Local Redis/Valkey instance
+   - Solution: Docker Compose uses internal network only (no external mapping)
+
+2. **Port 7880 (LiveKit)**
+   - Conflict: Another LiveKit instance
+   - Solution: Change `LIVEKIT_PORT` in `.env` and update `configs/livekit.yaml`
+
+3. **Port 8080 (Orchestrator)**
+   - Conflict: Another web service
+   - Solution: Use `configs/orchestrator.local.yaml` (port 8082)
+
+4. **Ports 50000-60000 (WebRTC)**
+   - Conflict: Limited by Docker
+   - Solution: Docker Compose uses subset (50000-50099), adjust in `docker-compose.yml` if needed
+
+### Security Considerations
+
+**Development** (localhost):
+- All services use unencrypted connections (HTTP/WS)
+- API keys are development defaults (`devkey`/`secret`)
+- No authentication required
+
+**Production** (exposed):
+- ✅ Use Caddy for TLS termination (HTTPS/WSS)
+- ✅ Change LiveKit API keys/secrets
+- ✅ Use strong Redis password
+- ✅ Enable firewall rules (only expose necessary ports)
+- ✅ Consider VPN for internal services
+- ⚠️ Never expose gRPC port 7001 directly
+- ⚠️ Never expose Redis port 6379 directly
+
+---
+
 ## Configuration
 
 ### Orchestrator Configuration
