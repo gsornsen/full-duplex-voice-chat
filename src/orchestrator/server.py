@@ -561,7 +561,11 @@ async def handle_session(
                     "timestamp_ms": timestamp_ms,
                     "asr_enabled": config.asr.enabled,
                     "session_state": session_manager.state.name,
-                    "audio_buffer_size": len(session_manager.audio_buffer) if hasattr(session_manager, 'audio_buffer') else 0,
+                    "audio_buffer_size": (
+                        len(session_manager.audio_buffer)
+                        if hasattr(session_manager, "audio_buffer")
+                        else 0
+                    ),
                 },
             )
 

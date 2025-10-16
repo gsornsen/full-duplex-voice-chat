@@ -18,13 +18,11 @@ Usage:
     python -m src.orchestrator.agent
 """
 
-import asyncio
 import logging
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
-from livekit import agents, rtc
+from livekit import agents
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -32,6 +30,8 @@ from livekit.agents import (
     WorkerOptions,
 )
 from livekit.plugins import openai, silero
+
+from src.plugins import grpc_tts, whisperx
 
 # Load environment variables
 load_dotenv()
@@ -63,11 +63,19 @@ class VoiceAssistantAgent(Agent):
             Keep your responses brief and conversational.
             Avoid complex formatting, emojis, or special characters.
             You are friendly, curious, and have a helpful attitude.""",
-            # Phase 1: Use OpenAI plugins directly (not LiveKit inference gateway)
-            # These will be replaced with custom plugins in Phases 2-3
-            stt=openai.STT(),  # Use OpenAI plugin directly
-            llm=openai.LLM(model="gpt-4o-mini"),  # Use OpenAI plugin directly
-            tts=openai.TTS(voice="alloy"),  # Use OpenAI plugin directly
+            # Phase 2: Custom WhisperX STT plugin (4-8x faster than OpenAI Whisper)
+            stt=whisperx.STT(
+                model_size="small",  # Good balance of speed and accuracy
+                device="cpu",  # Use CPU (GPU has cuDNN version mismatch in WSL2)
+                language="en",  # English language
+            ),
+            # Phase 1: Still using OpenAI LLM (Phase 4 will make this optional)
+            llm=openai.LLM(model="gpt-4o-mini"),
+            # Phase 3: Custom gRPC TTS plugin (connects to our TTS worker with Piper)
+            tts=grpc_tts.TTS(
+                worker_address="localhost:7001",  # TTS worker gRPC address
+                model_id="piper-en-us-lessac-medium",  # Piper CPU baseline model
+            ),
             # VAD: Required for streaming with OpenAI STT (which doesn't support streaming natively)
             # Configure with higher threshold to reduce false positives from background noise
             vad=silero.VAD.load(
@@ -105,7 +113,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Create agent session
     # Note: STT/TTS/LLM are configured in the Agent class constructor
     # AgentSession handles the runtime orchestration
-    session = AgentSession(
+    session: AgentSession[Agent] = AgentSession(
         # Interruption settings
         allow_interruptions=True,
         min_interruption_duration=0.5,  # 500ms minimum to register as interruption

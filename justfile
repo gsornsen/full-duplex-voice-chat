@@ -114,6 +114,34 @@ dev-agent:
     # Run honcho with agent Procfile
     uv run honcho start -f Procfile.agent 2>&1 | tee "${LOGFILE}"
 
+# Start all services with LiveKit Agent + custom WhisperX STT + gRPC TTS (Piper)
+dev-agent-piper:
+    #!/usr/bin/env bash
+    set -e
+    # Create logs directory if it doesn't exist
+    mkdir -p logs/dev-sessions
+
+    # Generate timestamp for log filename
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    LOGFILE="logs/dev-sessions/dev-agent-piper-${TIMESTAMP}.log"
+
+    echo "Starting development services with LiveKit Agent + Custom Plugins..."
+    echo "Services: LiveKit Server, Caddy, TTS Worker (Piper), LiveKit Agent"
+    echo "Custom Plugins: WhisperX STT (4-8x faster), gRPC TTS (Piper)"
+    echo "Logs: ${LOGFILE}"
+    echo ""
+    echo "NOTE: Using custom WhisperX STT + gRPC TTS (Piper CPU) + OpenAI LLM"
+    echo "      Phase 4 will make LLM optional for direct passthrough"
+    echo ""
+    echo "Stop with: Ctrl+C (single press, waits up to 10s for graceful shutdown)"
+    echo ""
+
+    # Unset Docker Compose environment variables that override local configs
+    unset REDIS_URL
+
+    # Run honcho with agent Procfile (already configured with Piper TTS worker)
+    uv run honcho start -f Procfile.agent 2>&1 | tee "${LOGFILE}"
+
 # Start all services with web client included
 dev-web:
     #!/usr/bin/env bash
@@ -138,36 +166,6 @@ dev-web:
 
     # Run honcho with tee to output to both console and log file
     uv run honcho start -f /tmp/Procfile.dev.tmp 2>&1 | tee "${LOGFILE}"
-
-# Start development services with Piper TTS adapter (CPU-based)
-dev-piper:
-    #!/usr/bin/env bash
-    set -e
-    # Create logs directory if it doesn't exist
-    mkdir -p logs/dev-sessions
-
-    # Generate timestamp for log filename
-    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-    LOGFILE="logs/dev-sessions/dev-piper-${TIMESTAMP}.log"
-
-    echo "Starting development services with Piper TTS adapter..."
-    echo "Services: Redis, LiveKit, TTS Worker (Piper), Orchestrator"
-    echo "Logs: ${LOGFILE}"
-    echo ""
-    echo "Note: Piper adapter uses CPU-only inference (no GPU required)"
-    echo "Press Ctrl+C to stop all services"
-    echo ""
-
-    # Create temporary Procfile with Piper adapter
-    cat > /tmp/Procfile.dev.piper <<'PROCFILE_EOF'
-    redis: docker run --rm --name redis-tts-dev -p 6379:6379 redis:7-alpine
-    livekit: docker run --rm --name livekit-dev -p 7880:7880 -p 7881:7881 -p 7882:7882/udp -v $PWD/configs/livekit.yaml:/etc/livekit.yaml:ro livekit/livekit-server:latest --config /etc/livekit.yaml
-    tts: uv run python -m src.tts.worker --adapter piper --default-model piper-en-us-lessac-medium --host localhost --port 7001
-    orchestrator: ORCHESTRATOR_CONFIG_PATH=configs/orchestrator.local.yaml uv run python -m src.orchestrator.server
-    PROCFILE_EOF
-
-    # Run honcho with tee to output to both console and log file
-    uv run honcho start -f /tmp/Procfile.dev.piper 2>&1 | tee "${LOGFILE}"
 
 dev-kill:
     #!/usr/bin/env bash
