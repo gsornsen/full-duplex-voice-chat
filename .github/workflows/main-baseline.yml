@@ -1,0 +1,113 @@
+name: Main Branch Baseline
+
+# Lightweight workflow for main branch
+# - Only uploads coverage and test results to Codecov
+# - No quality gates (those are enforced in PRs)
+# - Establishes baseline for Codecov analytics
+# - Minimal CI cost (~5 min vs full PR CI)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual triggers
+
+env:
+  PYTHON_VERSION: "3.13"
+  UV_VERSION: "latest"
+
+jobs:
+  baseline:
+    name: Codecov Baseline
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OS dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Cache protobuf stubs
+        uses: actions/cache@v4
+        with:
+          path: src/rpc/generated
+          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
+
+      - name: Generate protobuf stubs
+        run: |
+          uv run python -m grpc_tools.protoc \
+            -I src/rpc \
+            --python_out=src/rpc/generated \
+            --grpc_python_out=src/rpc/generated \
+            --pyi_out=src/rpc/generated \
+            src/rpc/tts.proto
+
+      - name: Fix protobuf imports
+        run: |
+          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+
+      - name: Run pytest with coverage
+        continue-on-error: true  # Don't fail if tests fail - we just want data
+        run: |
+          uv run pytest tests/ \
+            -v \
+            -m "not grpc" \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=term \
+            --tb=short \
+            --junitxml=test-results.xml \
+            -o junit_family=legacy
+        env:
+          GRPC_TESTS_ENABLED: "0"
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: pytest,main
+          name: codecov-main-baseline
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test-results.xml
+          flags: pytest,main
+          name: codecov-test-results-main
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Main Branch Baseline Upload" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Coverage and test results uploaded to Codecov" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Purpose**: Establish baseline for Codecov analytics" >> $GITHUB_STEP_SUMMARY
+          echo "**Note**: This workflow does not enforce quality gates" >> $GITHUB_STEP_SUMMARY
+          echo "**Quality gates**: Enforced in PR CI before merge" >> $GITHUB_STEP_SUMMARY
