@@ -1,0 +1,38 @@
+{
+  "// COMMENT": "Example config.json for CosyVoice 2 Voicepack",
+  "// LOCATION": "voicepacks/cosyvoice/{model_id}/config.json",
+
+  "audio": {
+    "sample_rate": 24000,
+    "n_fft": 1024,
+    "hop_length": 256,
+    "win_length": 1024,
+    "n_mels": 80,
+    "fmin": 0,
+    "fmax": 12000
+  },
+
+  "model": {
+    "hidden_channels": 256,
+    "inter_channels": 192,
+    "filter_channels": 768,
+    "n_heads": 2,
+    "n_layers": 6,
+    "kernel_size": 3,
+    "p_dropout": 0.1
+  },
+
+  "inference": {
+    "max_tokens": 2048,
+    "temperature": 1.0,
+    "speed": 1.0,
+    "streaming_chunk_size": 512
+  },
+
+  "// NOTES": [
+    "This is a minimal example config.json for CosyVoice 2.",
+    "Actual config may vary depending on model variant.",
+    "Convert from cosyvoice.yaml using: python -c 'import yaml, json; ...'",
+    "Sample rate is FIXED at 24000 Hz for CosyVoice 2."
+  ]
+}

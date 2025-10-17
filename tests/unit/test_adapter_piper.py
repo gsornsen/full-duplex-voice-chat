@@ -16,9 +16,11 @@ import pytest
 from src.tts.adapters.adapter_piper import (
     SAMPLES_PER_FRAME,
     TARGET_SAMPLE_RATE_HZ,
-    AdapterState,
     PiperTTSAdapter,
 )
+from src.tts.audio.framing import repacketize_to_20ms
+from src.tts.audio.resampling import resample_audio
+from src.tts.tts_base import AdapterState
 
 
 @pytest.fixture
@@ -242,58 +244,50 @@ async def test_synthesize_empty_audio(
 
 @pytest.mark.unit
 def test_resample_audio_22050_to_48000() -> None:
-    """Test resampling from 22050 Hz to 48000 Hz."""
+    """Test resampling from 22050 Hz to 48000 Hz using shared utility."""
     # Create a simple sine wave at 22050 Hz
     duration = 1.0  # 1 second
     freq = 440  # A4 note
     t = np.linspace(0, duration, int(22050 * duration))
     audio = (np.sin(2 * np.pi * freq * t) * 32767).astype(np.int16)
 
-    # Mock the adapter to test resampling
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
-        adapter.native_sample_rate = 22050
+    # Test shared resampling function
+    resampled = resample_audio(audio, 22050, 48000)
 
-        resampled = adapter._resample_audio(audio, 22050, 48000)
-
-        # Check output sample rate
-        expected_samples = int(len(audio) * 48000 / 22050)
-        assert len(resampled) == expected_samples
-        assert resampled.dtype == np.int16
+    # Check output sample rate
+    expected_samples = int(len(audio) * 48000 / 22050)
+    assert len(resampled) == expected_samples
+    assert resampled.dtype == np.int16
 
 
 @pytest.mark.unit
 def test_resample_audio_no_op_same_rate() -> None:
-    """Test resampling with same source and target rate (no-op)."""
+    """Test resampling with same source and target rate (no-op) using shared utility."""
     audio = np.zeros(48000, dtype=np.int16)
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
+    # Test shared resampling function
+    resampled = resample_audio(audio, 48000, 48000)
 
-        resampled = adapter._resample_audio(audio, 48000, 48000)
-
-        # Should return same array
-        assert resampled is audio
+    # Should return same array
+    assert resampled is audio
 
 
 @pytest.mark.unit
 def test_resample_audio_preserves_duration() -> None:
-    """Test that resampling preserves audio duration."""
+    """Test that resampling preserves audio duration using shared utility."""
     # 1 second of audio at 16000 Hz
     source_rate = 16000
     target_rate = 48000
     duration_samples = source_rate  # 1 second
     audio = np.random.randint(-32768, 32767, duration_samples, dtype=np.int16)
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
+    # Test shared resampling function
+    resampled = resample_audio(audio, source_rate, target_rate)
 
-        resampled = adapter._resample_audio(audio, source_rate, target_rate)
-
-        # Duration should be the same
-        original_duration = len(audio) / source_rate
-        resampled_duration = len(resampled) / target_rate
-        assert abs(original_duration - resampled_duration) < 0.001  # < 1ms difference
+    # Duration should be the same
+    original_duration = len(audio) / source_rate
+    resampled_duration = len(resampled) / target_rate
+    assert abs(original_duration - resampled_duration) < 0.001  # < 1ms difference
 
 
 # ============================================================================
@@ -303,50 +297,44 @@ def test_resample_audio_preserves_duration() -> None:
 
 @pytest.mark.unit
 def test_repacketize_exact_frames() -> None:
-    """Test repacketization with exact number of frames."""
+    """Test repacketization with exact number of frames using shared utility."""
     # 100ms of audio = 5 frames (20ms each)
     audio = np.zeros(4800, dtype=np.int16)  # 100ms at 48kHz
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
+    # Test shared repacketization function
+    frames = repacketize_to_20ms(audio, sample_rate=48000)
 
-        frames = adapter._repacketize_to_20ms(audio)
-
-        # Should have 5 frames
-        assert len(frames) == 5
-        # Each frame should be 960 samples * 2 bytes = 1920 bytes
-        assert all(len(frame) == 1920 for frame in frames)
+    # Should have 5 frames
+    assert len(frames) == 5
+    # Each frame should be 960 samples * 2 bytes = 1920 bytes
+    assert all(len(frame) == 1920 for frame in frames)
 
 
 @pytest.mark.unit
 def test_repacketize_with_padding() -> None:
-    """Test repacketization with padding on last frame."""
+    """Test repacketization with padding on last frame using shared utility."""
     # 50ms of audio = 2.5 frames, needs padding
     audio = np.zeros(2400, dtype=np.int16)  # 50ms at 48kHz
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
+    # Test shared repacketization function
+    frames = repacketize_to_20ms(audio, sample_rate=48000)
 
-        frames = adapter._repacketize_to_20ms(audio)
-
-        # Should have 3 frames (2 full + 1 padded)
-        assert len(frames) == 3
-        # All frames should be same size (last one padded)
-        assert all(len(frame) == 1920 for frame in frames)
+    # Should have 3 frames (2 full + 1 padded)
+    assert len(frames) == 3
+    # All frames should be same size (last one padded)
+    assert all(len(frame) == 1920 for frame in frames)
 
 
 @pytest.mark.unit
 def test_repacketize_empty_audio() -> None:
-    """Test repacketization with empty audio."""
+    """Test repacketization with empty audio using shared utility."""
     audio = np.zeros(0, dtype=np.int16)
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice"):
-        adapter = PiperTTSAdapter.__new__(PiperTTSAdapter)
+    # Test shared repacketization function
+    frames = repacketize_to_20ms(audio, sample_rate=48000)
 
-        frames = adapter._repacketize_to_20ms(audio)
-
-        # Should have no frames
-        assert len(frames) == 0
+    # Should have no frames
+    assert len(frames) == 0
 
 
 # ============================================================================

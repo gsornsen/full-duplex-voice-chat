@@ -1,23 +1,31 @@
-"""Piper TTS adapter - CPU-based neural TTS using ONNX Runtime.
+"""CosyVoice 2 TTS adapter - GPU-based neural TTS for realtime synthesis.
 
-This adapter integrates Piper TTS (https://github.com/rhasspy/piper) as the first
-real TTS model in the system, proving the adapter abstraction layer and establishing
-the baseline for future GPU adapters (M6-M8).
+This adapter integrates CosyVoice 2 (https://github.com/FunAudioLLM/CosyVoice) as the
+first GPU-accelerated TTS model in the system (M6). CosyVoice 2 is a high-quality,
+streaming-capable neural TTS system optimized for low-latency realtime synthesis.
 
-Piper is a fast, CPU-only neural TTS system using ONNX Runtime, making it ideal for
-edge deployments and low-latency inference.
+Key features:
+- Zero-shot voice cloning with 3-10s reference audio
+- Streaming synthesis with incremental text processing
+- GPU acceleration for sub-300ms First Audio Latency (FAL)
+- Multi-speaker support with voice embeddings
 """
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Final
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
-from piper import PiperVoice
+
+# Import CosyVoice 2 with graceful fallback for testing
+try:
+    from cosyvoice.cli.cosyvoice import CosyVoice2
+except ImportError:
+    CosyVoice2 = None  # Graceful degradation for testing
 
 from src.tts.audio.framing import repacketize_to_20ms
 from src.tts.audio.resampling import resample_audio
@@ -30,30 +38,41 @@ SAMPLES_PER_FRAME: Final[int] = 960  # 48000 Hz * 0.020 sec = 960 samples
 INTER_FRAME_DELAY_MS: Final[float] = 2.0  # Small delay to simulate streaming
 WARMUP_TEXT: Final[str] = "Testing warmup synthesis for model initialization."
 
+# CosyVoice 2 specific constants
+COSYVOICE_NATIVE_SAMPLE_RATE: Final[int] = 24000  # CosyVoice 2 native rate
+COSYVOICE_DEFAULT_SPEAKER: Final[str] = "default"  # Default speaker ID
+
 logger = logging.getLogger(__name__)
 
 
-class PiperTTSAdapter:
-    """Piper TTS adapter implementing the TTSAdapter protocol.
+class CosyVoiceAdapter:
+    """CosyVoice 2 TTS adapter implementing the TTSAdapter protocol.
 
-    This adapter loads Piper ONNX models from voicepacks and provides streaming
+    This adapter loads CosyVoice 2 models from voicepacks and provides streaming
     synthesis with 20ms PCM frames at 48kHz. It supports pause/resume/stop control
     commands with <50ms response time.
+
+    GPU acceleration enables:
+    - First Audio Latency (FAL): p95 < 300ms
+    - Streaming synthesis: incremental text processing
+    - Zero-shot voice cloning: 3-10s reference audio
+    - Multi-speaker support: voice embeddings
 
     Attributes:
         model_id: Identifier for the model instance
         model_path: Path to the voicepack directory
-        voice: Loaded Piper voice instance
-        native_sample_rate: Sample rate of the Piper model
+        device: CUDA device for model inference
+        model: Loaded CosyVoice model instance
+        native_sample_rate: Sample rate of the CosyVoice model (24000 Hz)
         state: Current adapter state (IDLE, SYNTHESIZING, PAUSED, STOPPED)
         pause_event: Event for pause/resume signaling
         stop_event: Event for stop signaling
         lock: Async lock for protecting state transitions
 
     Example:
-        >>> adapter = PiperTTSAdapter(
-        ...     model_id="piper-en-us-lessac-medium",
-        ...     model_path="voicepacks/piper/en-us-lessac-medium"
+        >>> adapter = CosyVoiceAdapter(
+        ...     model_id="cosyvoice2-en-base",
+        ...     model_path="voicepacks/cosyvoice/en-base"
         ... )
         >>> async def text_gen():
         ...     yield "Hello, world!"
@@ -63,15 +82,16 @@ class PiperTTSAdapter:
     """
 
     def __init__(self, model_id: str, model_path: str | Path) -> None:
-        """Initialize the Piper adapter.
+        """Initialize the CosyVoice adapter.
 
         Args:
-            model_id: Model identifier (e.g., "piper-en-us-lessac-medium")
+            model_id: Model identifier (e.g., "cosyvoice2-en-base")
             model_path: Path to the voicepack directory containing model files
 
         Raises:
             FileNotFoundError: If model files are missing
             ValueError: If model configuration is invalid
+            ImportError: If CosyVoice package is not installed
         """
         self.model_id = model_id
         self.model_path = Path(model_path)
@@ -81,47 +101,79 @@ class PiperTTSAdapter:
         self.stop_event = asyncio.Event()
         self.lock = asyncio.Lock()
 
-        # Find ONNX model and config files
-        onnx_files = list(self.model_path.glob("*.onnx"))
-        if not onnx_files:
-            raise FileNotFoundError(f"No ONNX model found in {self.model_path}")
+        # Check CUDA availability (warning only, not fatal)
+        if not torch.cuda.is_available():
+            logger.warning(
+                "CUDA is not available - CosyVoice requires GPU acceleration",
+                extra={"model_id": model_id},
+            )
 
-        onnx_path = onnx_files[0]
-        config_path = onnx_path.with_suffix(".onnx.json")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        # Load Piper voice
         logger.info(
-            "Loading Piper voice",
+            "Initializing CosyVoice adapter",
             extra={
                 "model_id": model_id,
-                "onnx_path": str(onnx_path),
-                "config_path": str(config_path),
+                "model_path": str(self.model_path),
+                "device": str(self.device),
+                "cuda_available": torch.cuda.is_available(),
+                "cuda_device_name": (
+                    torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
+                ),
             },
         )
 
-        self.voice = PiperVoice.load(str(onnx_path), str(config_path), use_cuda=False)
+        # Load CosyVoice 2 model
+        if CosyVoice2 is None:
+            logger.error(
+                "CosyVoice2 package not installed - cannot load model",
+                extra={"model_id": model_id},
+            )
+            raise ImportError(
+                "CosyVoice2 package not installed. "
+                "Install with: pip install cosyvoice"
+            )
 
-        # Read native sample rate from config
-        with open(config_path) as f:
-            config = json.load(f)
-            self.native_sample_rate = config["audio"]["sample_rate"]
+        try:
+            self.model = CosyVoice2(
+                str(self.model_path),
+                load_jit=False,  # Optional optimization
+                load_trt=False,  # Optional TensorRT (GPU-specific)
+                load_vllm=False,  # Optional vLLM acceleration
+                fp16=True,  # FP16 for faster inference
+            )
+            logger.info(
+                "CosyVoice 2 model loaded successfully",
+                extra={"model_id": model_id, "model_path": str(self.model_path)},
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to load CosyVoice 2 model",
+                extra={
+                    "model_id": model_id,
+                    "model_path": str(self.model_path),
+                    "error": str(e),
+                },
+            )
+            raise
+
+        # CosyVoice 2 has fixed 24kHz sample rate
+        self.native_sample_rate = COSYVOICE_NATIVE_SAMPLE_RATE
 
         logger.info(
-            "PiperTTSAdapter initialized",
+            "CosyVoiceAdapter initialized",
             extra={
                 "model_id": model_id,
                 "native_sample_rate": self.native_sample_rate,
                 "target_sample_rate": TARGET_SAMPLE_RATE_HZ,
+                "device": str(self.device),
             },
         )
 
     async def synthesize_stream(self, text_chunks: AsyncIterator[str]) -> AsyncIterator[bytes]:
         """Generate TTS audio for each text chunk.
 
-        For each text chunk, synthesizes audio using Piper, resamples to 48kHz,
+        For each text chunk, synthesizes audio using CosyVoice 2, resamples to 48kHz,
         and repacketizes into 20ms PCM frames. Yields frames one at a time with
         minimal delay to simulate realistic streaming behavior.
 
@@ -136,6 +188,7 @@ class PiperTTSAdapter:
             - Respects RESUME commands (continues yielding frames)
             - Respects STOP commands (terminates streaming)
             - All control commands respond within < 50ms
+            - Uses GPU acceleration for synthesis (CUDA)
         """
         async with self.lock:
             self.state = AdapterState.SYNTHESIZING
@@ -158,8 +211,8 @@ class PiperTTSAdapter:
                     },
                 )
 
-                # Synthesize audio using Piper (blocking call, run in executor)
-                audio = await asyncio.to_thread(self._synthesize_piper, text)
+                # Synthesize audio using CosyVoice (blocking call, run in executor)
+                audio = await asyncio.to_thread(self._synthesize_cosyvoice, text)
 
                 # Resample to 48kHz if needed
                 if self.native_sample_rate != TARGET_SAMPLE_RATE_HZ:
@@ -224,28 +277,93 @@ class PiperTTSAdapter:
                         extra={"state": self.state.value, "model_id": self.model_id},
                     )
 
-    def _synthesize_piper(self, text: str) -> NDArray[np.int16]:
-        """Synthesize audio using Piper (synchronous).
+    def _synthesize_cosyvoice(self, text: str) -> NDArray[np.int16]:
+        """Synthesize audio using CosyVoice 2 (synchronous).
 
         Args:
             text: Text to synthesize
 
         Returns:
-            Audio samples as int16 numpy array at native sample rate
+            Audio samples as int16 numpy array at native sample rate (24kHz)
+
+        Raises:
+            RuntimeError: If synthesis fails
+
+        Notes:
+            This is a blocking call that runs on GPU. It should be called via
+            asyncio.to_thread() to avoid blocking the event loop.
+
+            For M6, uses batch mode with default voice. Future enhancements:
+            - Voice cloning with reference audio
+            - True streaming mode (stream=True)
+            - Multi-speaker support
         """
-        # Piper's synthesize() returns an iterator of AudioChunk objects
-        audio_chunks: list[NDArray[np.int16]] = []
+        if self.model is None:
+            logger.error(
+                "Cannot synthesize - model not loaded",
+                extra={"model_id": self.model_id},
+            )
+            raise RuntimeError("Model not loaded")
 
-        for audio_chunk in self.voice.synthesize(text):
-            # Extract int16 array from AudioChunk
-            audio_chunks.append(audio_chunk.audio_int16_array)
+        try:
+            with torch.no_grad():
+                # CosyVoice 2 streaming API
+                # inference_zero_shot() returns a generator of audio chunks
+                audio_chunks: list[torch.Tensor] = []
 
-        # Concatenate all chunks
-        if not audio_chunks:
-            # Return silence if no audio generated
-            return np.zeros(0, dtype=np.int16)
+                # For M6: Use batch mode with default voice (no reference audio)
+                # Empty prompt_text and silence reference audio for default voice
+                for chunk in self.model.inference_zero_shot(
+                    tts_text=text,
+                    prompt_text="",  # Empty for default voice
+                    prompt_speech_16k=np.zeros(16000, dtype=np.float32),  # Silence ref
+                    stream=False,  # Use batch mode for simplicity (M6)
+                    speed=1.0,
+                ):
+                    # Extract audio tensor from chunk dict
+                    # Expected format: {'tts_speech': torch.Tensor}
+                    audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
+                    audio_chunks.append(audio_tensor)
 
-        return np.concatenate(audio_chunks)
+                # Concatenate chunks
+                if not audio_chunks:
+                    logger.warning(
+                        "No audio generated for text",
+                        extra={"model_id": self.model_id, "text_length": len(text)},
+                    )
+                    return np.zeros(0, dtype=np.int16)
+
+                # Concatenate along sample dimension: (1, total_samples)
+                audio_tensor = torch.cat(audio_chunks, dim=1)
+
+                # Convert to numpy: (1, samples) -> (samples,)
+                audio_float = audio_tensor.squeeze(0).cpu().numpy()
+
+                # Convert float32 [-1, 1] to int16 [-32768, 32767]
+                audio_int16 = (audio_float * 32767).clip(-32768, 32767).astype(np.int16)
+
+                logger.debug(
+                    "CosyVoice synthesis complete",
+                    extra={
+                        "model_id": self.model_id,
+                        "text_length": len(text),
+                        "audio_samples": len(audio_int16),
+                        "audio_duration_ms": len(audio_int16) / self.native_sample_rate * 1000,
+                    },
+                )
+
+                return audio_int16
+
+        except Exception as e:
+            logger.error(
+                "CosyVoice synthesis failed",
+                extra={
+                    "model_id": self.model_id,
+                    "text_length": len(text),
+                    "error": str(e),
+                },
+            )
+            raise RuntimeError(f"CosyVoice synthesis failed: {e}") from e
 
     async def control(self, command: str) -> None:
         """Handle control commands with < 50ms response time.
@@ -322,44 +440,77 @@ class PiperTTSAdapter:
                 raise ValueError(f"Unknown control command: {command}")
 
     async def load_model(self, model_id: str) -> None:
-        """Load a specific Piper model.
+        """Load a specific CosyVoice model.
 
         Args:
             model_id: Model identifier
 
         Notes:
-            For M5, this is simplified - the model is loaded at initialization.
-            Future implementations (M4+) may support dynamic model loading.
+            For M6, this is simplified - the model is loaded at initialization.
+            Future implementations may support dynamic model loading for the
+            Model Manager (M4) to manage multiple models with TTL-based eviction.
+
+            GPU memory management:
+            - Model size: ~1-2GB VRAM (typical for CosyVoice)
+            - Consider unloading unused models to free VRAM
+            - Use torch.cuda.empty_cache() after unloading
         """
         logger.info(
-            "Piper load_model called (model already loaded at init)",
+            "CosyVoice load_model called (model already loaded at init)",
             extra={"model_id": model_id, "adapter_model_id": self.model_id},
         )
+
+        # TODO: Implement dynamic model loading for M4+ if needed
+        # if self.model is None:
+        #     self.model = CosyVoice2(
+        #         str(self.model_path),
+        #         load_jit=False,
+        #         load_trt=False,
+        #         load_vllm=False,
+        #         fp16=True,
+        #     )
 
     async def unload_model(self, model_id: str) -> None:
-        """Unload a specific Piper model.
+        """Unload a specific CosyVoice model.
 
         Args:
             model_id: Model identifier
 
         Notes:
-            For M5, this is simplified - model lifecycle is managed by adapter
-            instance lifecycle. Future implementations (M4+) may support dynamic unloading.
+            For M6, this is simplified - model lifecycle is managed by adapter
+            instance lifecycle. Future implementations may support dynamic unloading
+            for GPU memory management (M4+).
+
+            GPU memory cleanup:
+            - Delete model reference
+            - Call torch.cuda.empty_cache() to free VRAM
+            - Monitor VRAM usage with torch.cuda.memory_allocated()
         """
         logger.info(
-            "Piper unload_model called (model lifecycle managed by instance)",
+            "CosyVoice unload_model called (model lifecycle managed by instance)",
             extra={"model_id": model_id, "adapter_model_id": self.model_id},
         )
+
+        # TODO: Implement dynamic model unloading for M4+ if needed
+        # if self.model is not None:
+        #     del self.model
+        #     self.model = None
+        #     torch.cuda.empty_cache()
 
     async def warm_up(self) -> None:
         """Warm up the model by synthesizing a test utterance.
 
         This method synthesizes a short test sentence to ensure the model
-        is fully loaded and cached for faster first-real-synthesis latency.
+        is fully loaded, cached, and GPU kernels are compiled for faster
+        first-real-synthesis latency.
 
         Notes:
-            Target: <1s warmup time on modern CPU
+            Target: <1s warmup time on modern GPU (RTX 3090/4090, A100)
             Discards output audio, measures duration for telemetry
+            GPU-specific optimizations:
+            - Compile CUDA kernels on first run
+            - Cache embeddings for default speaker
+            - Allocate GPU memory upfront
         """
         import time
 
@@ -368,7 +519,7 @@ class PiperTTSAdapter:
         start_time = time.perf_counter()
 
         # Synthesize warmup text
-        audio = await asyncio.to_thread(self._synthesize_piper, WARMUP_TEXT)
+        audio = await asyncio.to_thread(self._synthesize_cosyvoice, WARMUP_TEXT)
 
         # Resample and repacketize (same as normal synthesis)
         if self.native_sample_rate != TARGET_SAMPLE_RATE_HZ:
@@ -379,12 +530,22 @@ class PiperTTSAdapter:
         # Just measure, don't repacketize
         warmup_duration_ms = (time.perf_counter() - start_time) * 1000
 
+        # Log GPU memory usage
+        if torch.cuda.is_available():
+            gpu_memory_allocated_mb = torch.cuda.memory_allocated(self.device) / 1024 / 1024
+            gpu_memory_reserved_mb = torch.cuda.memory_reserved(self.device) / 1024 / 1024
+        else:
+            gpu_memory_allocated_mb = 0.0
+            gpu_memory_reserved_mb = 0.0
+
         logger.info(
             "Warmup synthesis complete",
             extra={
                 "model_id": self.model_id,
                 "warmup_duration_ms": warmup_duration_ms,
                 "audio_duration_ms": len(audio) / TARGET_SAMPLE_RATE_HZ * 1000,
+                "gpu_memory_allocated_mb": gpu_memory_allocated_mb,
+                "gpu_memory_reserved_mb": gpu_memory_reserved_mb,
             },
         )
 
@@ -408,6 +569,7 @@ class PiperTTSAdapter:
 
         Notes:
             Not part of the TTSAdapter protocol - for testing only.
+            Does NOT clear GPU memory or reload the model.
         """
         async with self.lock:
             self.state = AdapterState.IDLE
