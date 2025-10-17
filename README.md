@@ -85,7 +85,7 @@ See [Development Guide](docs/DEVELOPMENT.md) for detailed setup.
 
 ### Test Coverage ✅
 
-- **655 Total Tests**: 384 unit + 271 integration tests passing
+- **649 Total Tests**: 500 unit + 139 integration + 10 performance tests passing
 - **M1-M5**: 113 tests (core infrastructure, VAD, Model Manager, Piper adapter)
 - **M10**: 128 tests (ASR base, audio buffer, Whisper + WhisperX adapters, performance)
 - **M10 Polish**: 71 tests (RMS buffer, session timeout, multi-turn conversation - Tasks 4 & 7)
@@ -217,8 +217,9 @@ full-duplex-voice-chat/
 │       └── web/               # Browser client (LiveKit WebRTC)
 │
 ├── tests/
-│   ├── unit/                  # Fast, isolated tests (384 passing)
-│   └── integration/           # End-to-end tests (271 passing)
+│   ├── unit/                  # Fast, isolated tests (500 passing)
+│   ├── integration/           # End-to-end tests (139 passing)
+│   └── performance/           # Performance benchmarks (10 tests)
 │
 ├── configs/
 │   ├── orchestrator.yaml      # Transport, VAD, ASR, routing config

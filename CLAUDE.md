@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Last Updated**: 2025-10-12
+**Last Updated**: 2025-10-16
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -758,7 +758,8 @@ The project follows a phased implementation plan (see `project_documentation/INC
 - **Alternative**: Skip gRPC tests in WSL2 (automatic detection), run in Docker or native Linux
 
 **Test Coverage Summary (M0-M10 + M10 Polish)**:
-- **Total Tests**: 649 tests (as of 2025-10-12)
+- **Total Tests**: 649 tests (as of 2025-10-16)
+- **Test Breakdown**: 500 unit tests + 139 integration tests + 10 performance tests
 - **M0-M5 Tests**: 113 tests (core infrastructure, VAD, Model Manager, Piper adapter)
 - **M10 ASR Tests**: 128 tests (Whisper + WhisperX adapters, audio buffer, performance)
 - **M10 Polish Tests**: 65 tests ✅ Complete (31 RMS buffer + 21 session timeout + 13 multi-turn conversation)
@@ -850,8 +851,9 @@ Total: 4m 35s (vs 12m 15s full suite)
 
 3. **Full Test Suite** (pytest)
    - All 649 tests must pass
-   - Unit tests (384 tests)
-   - Integration tests (265 tests)
+   - Unit tests (500 tests)
+   - Integration tests (139 tests)
+   - Performance tests (10 tests)
    - Excludes gRPC tests on non-Docker runners
 
 4. **Code Coverage** (codecov)
