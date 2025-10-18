@@ -1,0 +1,154 @@
+# =============================================================================
+# Base Infrastructure - Docker Compose Configuration
+# =============================================================================
+# This file defines core infrastructure services (Redis, LiveKit, Caddy, Orchestrator)
+# that run regardless of model selection.
+#
+# Usage:
+#   docker compose up                    # Infrastructure only
+#   docker compose --profile piper up    # Infrastructure + Piper worker
+#   docker compose --profile cosyvoice up # Infrastructure + CosyVoice worker
+#
+# See: /tmp/unified_dev_workflow_design.md Section 4
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis - Service Discovery & State
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis-tts
+    # No external port mapping - only accessible within Docker network
+    # This prevents port conflicts with host Redis/Valkey instances
+    # Services use internal DNS: redis:6379
+    # To access from host for debugging: docker exec -it redis-tts redis-cli
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "localhost", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - tts-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # LiveKit Server - WebRTC Transport
+  # ---------------------------------------------------------------------------
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"   # WebRTC/WebSocket
+      - "7881:7881"   # RTC TCP port
+      - "7882:7882/udp" # TURN/UDP
+      - "50000-50099:50000-50099/udp"  # RTC port range (subset for Docker)
+    volumes:
+      - ../../configs/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tts-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Caddy - Reverse Proxy for HTTPS
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
+    ports:
+      - "8443:8443"    # HTTPS for web client
+      - "8444:8444"    # HTTPS for LiveKit WebSocket
+      - "80:80"        # HTTP (optional, for redirects)
+    volumes:
+      - ../../Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro
+      - ../../voicechat.local+3-key.pem:/etc/caddy/voicechat.local+3-key.pem:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    depends_on:
+      livekit:
+        condition: service_healthy
+    extra_hosts:
+      # Allow Caddy to reach host machine (for Next.js on host:3000)
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - tts-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator - Main Application Logic
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.orchestrator
+    container_name: orchestrator
+    command: ["uv", "run", "python", "-m", "src.orchestrator.server", "--config", "configs/orchestrator.docker.yaml"]
+    ports:
+      - "8080:8080"  # WebSocket
+      - "8081:8081"  # Health check HTTP
+    environment:
+      # Use internal Docker DNS and correct Redis port (6379 inside container)
+      - REDIS_URL=redis://redis:6379
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret1234567890abcdefghijklmn
+      - ASR_ENABLED=true
+      - ASR_ADAPTER=whisperx
+      - ASR_MODEL_SIZE=small
+      - ASR_DEVICE=auto
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+      # NOTE: Removed hard dependency on tts worker
+      # Orchestrator will discover workers via Redis service discovery
+      # This allows hot-swapping workers without restarting orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  tts-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  caddy-logs:
+    driver: local

@@ -1,0 +1,115 @@
+# =============================================================================
+# Model Workers - Docker Compose Configuration
+# =============================================================================
+# This file defines TTS worker services with profile-based selection.
+# Only one worker is active at a time (mutually exclusive profiles).
+#
+# Usage:
+#   docker compose --profile piper up        # Start with Piper (CPU)
+#   docker compose --profile cosyvoice up    # Start with CosyVoice (GPU)
+#
+# All workers get network alias 'tts' (generic, no version suffix)
+# Orchestrator discovers workers via Redis service discovery
+#
+# See: /tmp/unified_dev_workflow_design.md Section 4
+
+services:
+  # ---------------------------------------------------------------------------
+  # Piper TTS Worker (CPU, Default)
+  # ---------------------------------------------------------------------------
+  tts-piper:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.tts
+    container_name: tts-piper
+    ports:
+      - "7001:7001"  # gRPC
+      - "9090:9090"  # Metrics
+    environment:
+      # Use internal Docker DNS and correct Redis port (6379 inside container)
+      - REDIS_URL=redis://redis:6379
+      - WORKER_NAME=tts-piper
+      - WORKER_PORT=7001
+      - DEFAULT_MODEL_ID=piper-en-us-lessac-medium
+      - LOG_LEVEL=INFO
+    env_file:
+      # Load model-specific configuration
+      - ../../.env.models/.env.piper
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Use bash built-in TCP test instead of nc
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      tts-network:
+        # Generic alias - allows orchestrator to connect to 'tts' service
+        aliases:
+          - tts
+    volumes:
+      - ../../voicepacks:/app/voicepacks:ro
+    profiles:
+      - piper
+      - default  # Default profile (starts with 'docker compose up')
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # CosyVoice 2 TTS Worker (GPU, Isolated PyTorch 2.3.1)
+  # ---------------------------------------------------------------------------
+  # This service uses a separate Dockerfile to avoid PyTorch version conflicts
+  # with the main project (PyTorch 2.7.0 vs CosyVoice requirement of 2.3.1)
+  tts-cosyvoice:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.tts-cosyvoice
+    container_name: tts-cosyvoice
+    ports:
+      - "7002:7002"  # gRPC
+      - "9091:9091"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-cosyvoice
+      - WORKER_PORT=7002
+      - DEFAULT_MODEL_ID=cosyvoice2-en-base
+      - TTL_MS=600000
+      - RESIDENT_CAP=2
+      - LOG_LEVEL=INFO
+    env_file:
+      # Load model-specific configuration
+      - ../../.env.models/.env.cosyvoice
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7002' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s  # CosyVoice model loading takes longer
+    networks:
+      tts-network:
+        # Generic alias - same as Piper, but mutually exclusive
+        aliases:
+          - tts
+    volumes:
+      # Mount voicepacks directory for CosyVoice models
+      - ../../voicepacks/cosyvoice:/app/voicepacks/cosyvoice:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+        limits:
+          memory: 8G  # CosyVoice 2 needs ~6-8GB VRAM
+    profiles:
+      - cosyvoice  # Only start with: docker compose --profile cosyvoice up
+    restart: unless-stopped
+
+# NOTE: Future model workers (XTTS, Sesame, OpenAI) will be added here
+# following the same pattern with unique profiles.

@@ -1,0 +1,52 @@
+# =============================================================================
+# Development Overrides - Docker Compose Configuration
+# =============================================================================
+# This file provides development-specific overrides for hot reload, debugging,
+# and enhanced logging.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.models.yml -f docker-compose.dev.yml --profile piper up
+#
+# Or use the justfile wrapper:
+#   just dev piper       # Includes dev overrides automatically
+#
+# See: /tmp/unified_dev_workflow_design.md Section 4
+
+services:
+  # ---------------------------------------------------------------------------
+  # Orchestrator - Development Overrides
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+      - ENABLE_PROFILING=true
+    volumes:
+      # Mount source code for hot reload (read-only for safety)
+      - ../../src:/app/src:ro
+      - ../../configs:/app/configs:ro
+
+  # ---------------------------------------------------------------------------
+  # Piper Worker - Development Overrides
+  # ---------------------------------------------------------------------------
+  tts-piper:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+    volumes:
+      # Mount source code for hot reload
+      - ../../src:/app/src:ro
+      - ../../voicepacks:/app/voicepacks:ro
+
+  # ---------------------------------------------------------------------------
+  # CosyVoice Worker - Development Overrides
+  # ---------------------------------------------------------------------------
+  tts-cosyvoice:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+      - ENABLE_PROFILING=true
+    volumes:
+      # Mount source code for hot reload
+      - ../../src:/app/src:ro
+      - ../../voicepacks/cosyvoice:/app/voicepacks/cosyvoice:ro
