@@ -22,7 +22,7 @@
 #
 # Prerequisites:
 #   - Python 3.10+
-#   - modelscope package (pip install modelscope)
+#   - modelscope package
 #   - Git LFS (optional, for manual cloning)
 #
 
@@ -94,11 +94,23 @@ check_command() {
 
 check_python_package() {
     local package="$1"
-    if ! python3 -c "import $package" 2>/dev/null; then
-        log_error "Required Python package not found: $package"
-        log_error "Install with: pip install $package"
+    if ! uv run python -c "import $package" 2>/dev/null; then
+        log_warn "Python package not found: $package"
         return 1
     fi
+}
+
+install_python_package() {
+    local package="$1"
+    log_info "Installing Python package: $package"
+    
+    if ! uv add "$package"; then
+        log_error "Failed to install Python package: $package"
+        return 1
+    fi
+    
+    log_success "Successfully installed: $package"
+    return 0
 }
 
 # ============================================================================
@@ -109,18 +121,21 @@ validate_environment() {
     log_info "Validating environment..."
 
     # Check commands
-    check_command python3 || exit 1
+    check_command uv run python || exit 1
     check_command jq || { log_warn "jq not found (optional, for JSON validation)"; }
 
     # Check Python packages
     check_python_package yaml || exit 1
 
     if [[ "$SKIP_DOWNLOAD" == "0" ]]; then
-        check_python_package modelscope || {
-            log_error "modelscope package required for downloading models"
-            log_error "Install with: pip install modelscope"
-            exit 1
-        }
+        if ! check_python_package modelscope; then
+            log_info "modelscope package not found, attempting to install..."
+            if ! install_python_package modelscope; then
+                log_error "Failed to install modelscope package"
+                log_error "You can try installing manually with: uv add modelscope"
+                exit 1
+            fi
+        fi
     fi
 
     log_success "Environment validated"
@@ -164,7 +179,7 @@ download_model() {
     mkdir -p "$DOWNLOAD_DIR"
 
     # Download using ModelScope Python SDK
-    python3 - <<EOF
+    uv run python - <<EOF
 from modelscope import snapshot_download
 import sys
 
@@ -235,7 +250,7 @@ EOF
     fi
 
     # Convert YAML to JSON using Python
-    python3 - <<EOF
+    uv run python - <<EOF
 import yaml
 import json
 
@@ -456,7 +471,7 @@ validate_voicepack() {
 
     # Validate metadata.yaml
     if [[ -f "$voicepack_path/metadata.yaml" ]]; then
-        python3 - <<EOF
+        uv run python - <<EOF
 import yaml
 import sys
 
