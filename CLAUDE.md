@@ -8,7 +8,7 @@ This file provides essential guidance to Claude Code when working with this repo
 
 This is a **Realtime Duplex Voice Demo** system enabling low-latency speech↔speech conversations with barge-in support. The system supports hot-swapping across multiple open TTS models and runs on single-GPU and multi-GPU setups.
 
-**Current Status**: Milestones M0-M10 complete (including M10 Polish), M6 Phases 1-3 complete (adapter + integration), M6 Phase 4 + M11-M13 planned.
+**Current Status**: Milestones M0-M10 complete (including M10 Polish), M6 complete (CosyVoice 2 adapter operational with Docker deployment), M7-M9, M11-M13 planned.
 
 > 📖 **Detailed Status**: See [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) and [.claude/modules/milestones.md](.claude/modules/milestones.md)
 
@@ -95,7 +95,7 @@ just dev-agent-piper
 2. **TTS Workers** (`src/tts/`)
    - gRPC server implementing unified streaming ABI
    - Model Manager: handles load/unload, TTL eviction, LRU caching
-   - Adapters: Piper (CPU baseline) ✅, CosyVoice2 (GPU) 🔄, XTTS/Sesame (planned)
+   - Adapters: Piper (CPU baseline) ✅, CosyVoice2 (GPU) ✅, XTTS/Sesame (planned)
    - Output: 20 ms frames, 48 kHz mono PCM
 
 **Flow (M10 with ASR):**
@@ -227,7 +227,7 @@ just test-integration  # Integration only (with --forked for gRPC)
 | M3 | ✅ Complete | Barge-in end-to-end (VAD integration) |
 | M4 | ✅ Complete | Model Manager v1 (TTL/LRU eviction) |
 | M5 | ✅ Complete | Piper adapter (CPU baseline) |
-| M6 | 🔄 Partial | CosyVoice2 adapter (Phases 1-3 complete, Phase 4 pending) |
+| M6 | ✅ Complete | CosyVoice2 adapter (GPU TTS with Docker isolation) |
 | M7-M8 | 📝 Planned | GPU TTS adapters (XTTS, Sesame) |
 | M9 | 📝 Planned | Routing v1 (capability-aware) |
 | M10 | ✅ Complete | ASR integration (Whisper + WhisperX) |

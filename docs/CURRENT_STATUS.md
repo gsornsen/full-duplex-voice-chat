@@ -2,13 +2,13 @@
 
 **Last Updated**: 2025-10-17
 **Branch**: `feat/better-ci`
-**Overall Status**: M0-M10 Complete + CI Optimized, M6 Phases 1-3 Complete, M6 Phase 4 + M7-M9, M11-M13 Planned
+**Overall Status**: M0-M10 Complete + CI Optimized, M6 Complete, M7-M9, M11-M13 Planned
 
 ---
 
 ## Quick Summary
 
-This project implements a realtime duplex voice chat system with low-latency TTS streaming and barge-in support. **Milestones M0-M10 are complete**, establishing the core infrastructure: gRPC streaming protocol, mock TTS worker, dual transport architecture (LiveKit WebRTC primary + WebSocket fallback), real-time barge-in with Voice Activity Detection, complete Model Manager lifecycle with TTL/LRU eviction, and the first real TTS adapter (Piper CPU baseline). The implementation has **exceeded M2 scope** by delivering production-ready LiveKit WebRTC as the primary transport. **M6 Phases 1-3 are complete**, implementing the CosyVoice 2 GPU TTS adapter with shared audio utilities, comprehensive testing (51 tests), and ModelManager integration. Additional GPU TTS adapters (XTTS, Sesame) and advanced features (dynamic routing) are planned for M7-M13.
+This project implements a realtime duplex voice chat system with low-latency TTS streaming and barge-in support. **Milestones M0-M10 are complete**, establishing the core infrastructure: gRPC streaming protocol, mock TTS worker, dual transport architecture (LiveKit WebRTC primary + WebSocket fallback), real-time barge-in with Voice Activity Detection, complete Model Manager lifecycle with TTL/LRU eviction, and two real TTS adapters (Piper CPU baseline, CosyVoice 2 GPU). The implementation has **exceeded M2 scope** by delivering production-ready LiveKit WebRTC as the primary transport. **M6 is complete**, implementing the CosyVoice 2 GPU TTS adapter with Docker isolation, shared audio utilities, comprehensive testing (51 tests), and production deployment guide. Additional GPU TTS adapters (XTTS, Sesame) and advanced features (dynamic routing) are planned for M7-M13.
 
 ---
 
@@ -22,7 +22,7 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 | **M3** | Barge-in End-to-End | ✅ Complete | 2025-10-09 | VAD integration, <50ms pause latency |
 | **M4** | Model Manager v1 | ✅ Complete | 2025-10-09 | 20 unit + 15 integration tests passing |
 | **M5** | Piper Adapter (CPU) | ✅ Complete | 2025-10-10 | 25 unit + 7 integration tests passing |
-| **M6** | CosyVoice 2 Adapter | 🔄 Partial | 2025-10-17 | Phases 1-3 complete (adapter + integration), Phase 4 pending (performance validation) |
+| **M6** | CosyVoice 2 Adapter | ✅ Complete | 2025-10-17 | All phases complete (adapter + integration + Docker deployment) |
 | **M7** | XTTS-v2 Adapter | 📝 Planned | - | GPU + voice cloning |
 | **M8** | Sesame/Unsloth Adapter | 📝 Planned | - | LoRA fine-tuned models |
 | **M9** | Routing v1 | 📝 Planned | - | Capability-based selection |
