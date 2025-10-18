@@ -53,7 +53,8 @@
       "mcp__taskqueue__list_projects",
       "Bash(curl:*)",
       "Bash(ls:*)",
-      "Read(//home/gerald/git/mycelium/**)"
+      "Read(//home/gerald/git/mycelium/**)",
+      "mcp__RedisMCPServer__hset"
     ],
     "deny": [],
     "ask": []

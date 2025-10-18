@@ -411,9 +411,9 @@ fix:
 typecheck:
     uv run mypy src/ tests/
 
-# Run pytest tests (excludes performance benchmarks and integration tests requiring Docker)
+# Run pytest tests (excludes performance benchmarks, Docker, and gRPC tests that require --forked)
 test:
-    uv run pytest tests/ -v -m "not performance and not docker"
+    uv run pytest tests/ -v -m "not performance and not docker and not grpc"
 
 # Run integration tests with process isolation (requires Docker services)
 test-integration:

@@ -39,6 +39,8 @@ Performance Targets:
 - End-to-end workflow: < 10s (text → first audio frame)
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import subprocess
@@ -80,7 +82,7 @@ def docker_compose_file(project_root: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def redis_client() -> aioredis.Redis:
+def redis_client() -> aioredis.Redis[bytes]:
     """Create async Redis client for service discovery tests.
 
     Returns:
@@ -343,7 +345,7 @@ class TestModelSwitching:
 
     @pytest.mark.skip(reason="Requires TTS worker implementation with dynamic model switching")
     async def test_model_switch_piper_to_cosyvoice(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test switching from Piper to CosyVoice adapter.
 
@@ -361,7 +363,7 @@ class TestModelSwitching:
 
     @pytest.mark.skip(reason="Requires orchestrator model switching support")
     async def test_model_switch_during_session(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test switching models while orchestrator is running.
 
@@ -403,7 +405,7 @@ class TestServiceDiscovery:
 
     @pytest.mark.skip(reason="Requires orchestrator startup without TTS worker")
     async def test_orchestrator_starts_without_tts(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test orchestrator starts even if TTS worker is down.
 
@@ -419,7 +421,7 @@ class TestServiceDiscovery:
 
     @pytest.mark.skip(reason="Requires network alias configuration testing")
     async def test_orchestrator_discovers_tts(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test orchestrator finds TTS worker via network alias.
 
@@ -435,7 +437,7 @@ class TestServiceDiscovery:
 
     @pytest.mark.skip(reason="Requires TTS worker restart handling")
     async def test_orchestrator_handles_tts_restart(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test orchestrator handles TTS worker restart gracefully.
 
@@ -515,7 +517,7 @@ class TestEndToEndWorkflow:
 
     @pytest.mark.skip(reason="Requires full Docker Compose stack with Piper")
     async def test_full_workflow_piper(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test full workflow with Piper adapter.
 
@@ -533,7 +535,7 @@ class TestEndToEndWorkflow:
 
     @pytest.mark.skip(reason="Requires CosyVoice Docker profile")
     async def test_full_workflow_cosyvoice(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test full workflow with CosyVoice adapter.
 
@@ -550,7 +552,7 @@ class TestEndToEndWorkflow:
 
     @pytest.mark.skip(reason="Requires model switching implementation")
     async def test_model_switch_preserves_session(
-        self, docker_compose_file: Path, redis_client: aioredis.Redis
+        self, docker_compose_file: Path, redis_client: aioredis.Redis[bytes]
     ) -> None:
         """Test switching models mid-conversation preserves session.
 
@@ -693,7 +695,8 @@ def wait_for_http(
             )
             if result.stdout.strip() == str(expected_status):
                 return True
-        except Exception:
+        except Exception:  # noqa: S110
+            # Ignore errors during health check retry (network/timeout/etc)
             pass
         time.sleep(1)
 
