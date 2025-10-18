@@ -6,6 +6,7 @@ control commands, and model lifecycle operations via the ModelManager.
 """
 
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -524,7 +525,7 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
 
             capabilities = tts_pb2.Capabilities(
                 streaming=True,
-                zero_shot=False,  # M4: mock adapter doesn't support zero-shot
+                zero_shot=False,  # M5 baseline: no zero-shot support yet
                 lora=False,
                 cpu_ok=True,
                 languages=["en"],
@@ -598,9 +599,18 @@ async def start_worker(config: dict[str, Any]) -> None:
 
     mm_config = config.get("model_manager", {})
 
+    # Resolve default model ID with environment variable fallback
+    default_model_id = mm_config.get("default_model_id", "mock-440hz")
+    model_source = mm_config.get("default_model_source", "config")
+
+    # Environment variable fallback (if not already set via CLI or __main__.py)
+    if model_source == "config" and (env_model := os.getenv("DEFAULT_MODEL")):
+        default_model_id = env_model
+        model_source = "env"
+
     # Create ModelManager
     model_manager = ModelManager(
-        default_model_id=mm_config.get("default_model_id", "mock-440hz"),
+        default_model_id=default_model_id,
         preload_model_ids=mm_config.get("preload_model_ids", []),
         ttl_ms=mm_config.get("ttl_ms", 600000),
         min_residency_ms=mm_config.get("min_residency_ms", 120000),
@@ -609,6 +619,16 @@ async def start_worker(config: dict[str, Any]) -> None:
         warmup_enabled=mm_config.get("warmup_enabled", True),
         warmup_text=mm_config.get("warmup_text", "This is a warmup test."),
         evict_check_interval_ms=mm_config.get("evict_check_interval_ms", 30000),
+    )
+
+    # Log model configuration source
+    logger.info(
+        "ModelManager configured",
+        extra={
+            "default_model_id": default_model_id,
+            "model_source": model_source,
+            "preload_model_ids": mm_config.get("preload_model_ids", []),
+        },
     )
 
     # Initialize ModelManager (load default/preload models, start eviction)

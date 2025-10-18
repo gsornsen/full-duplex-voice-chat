@@ -7,6 +7,7 @@ It provides command-line argument parsing for the TTS worker server.
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--default-model",
         type=str,
-        help="Override default model ID from config",
+        help="Override default model ID from config (precedence: CLI > ENV > config)",
     )
     parser.add_argument(
         "--preload",
@@ -86,6 +87,11 @@ async def main() -> None:
 
     Loads configuration, sets up logging, and starts the gRPC server.
     Runs until interrupted with Ctrl+C or SIGTERM.
+
+    Configuration precedence for default_model_id:
+        1. CLI flag (--default-model)
+        2. Environment variable (DEFAULT_MODEL)
+        3. YAML config (model_manager.default_model_id)
     """
     args = parse_args()
 
@@ -99,9 +105,18 @@ async def main() -> None:
         print(f"Error: Failed to load configuration: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Apply CLI overrides
+    # Apply configuration overrides with precedence: CLI > ENV > config
+    model_source = "config"
+
+    # Default model ID: CLI > ENV > config
     if args.default_model:
         config.model_manager.default_model_id = args.default_model
+        model_source = "cli"
+    elif env_model := os.getenv("DEFAULT_MODEL"):
+        config.model_manager.default_model_id = env_model
+        model_source = "env"
+
+    # Apply other CLI overrides
     if args.preload:
         config.model_manager.preload_model_ids = args.preload
     if args.port:
@@ -120,6 +135,7 @@ async def main() -> None:
             "grpc_port": config.worker.grpc_port,
             "adapter": args.adapter,
             "default_model": config.model_manager.default_model_id,
+            "model_source": model_source,  # Track where config came from
             "preload_models": config.model_manager.preload_model_ids,
         },
     )
@@ -132,6 +148,7 @@ async def main() -> None:
         "adapter": args.adapter,
         "model_manager": {
             "default_model_id": config.model_manager.default_model_id,
+            "default_model_source": model_source,  # Pass source to worker.py
             "preload_model_ids": config.model_manager.preload_model_ids,
             "ttl_ms": config.model_manager.ttl_ms,
             "min_residency_ms": config.model_manager.min_residency_ms,
