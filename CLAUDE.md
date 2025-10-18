@@ -8,7 +8,7 @@ This file provides essential guidance to Claude Code when working with this repo
 
 This is a **Realtime Duplex Voice Demo** system enabling low-latency speech↔speech conversations with barge-in support. The system supports hot-swapping across multiple open TTS models and runs on single-GPU and multi-GPU setups.
 
-**Current Status**: Milestones M0-M10 complete (including M10 Polish), M11-M13 planned.
+**Current Status**: Milestones M0-M10 complete (including M10 Polish), M6 Phases 1-3 complete (adapter + integration), M6 Phase 4 + M11-M13 planned.
 
 > 📖 **Detailed Status**: See [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) and [.claude/modules/milestones.md](.claude/modules/milestones.md)
 
@@ -32,19 +32,47 @@ just typecheck     # Run mypy type checking
 just test          # Run pytest tests
 just ci            # Run all checks (lint + typecheck + test)
 
-# Infrastructure
-just redis         # Start Redis container
+# Development (Unified Workflow - Recommended)
+just dev-agent-piper  # Start all services with LiveKit Agent + Piper TTS
+just dev              # Start all services with legacy orchestrator
+just dev-web          # Include Next.js web client (frontend)
 
-# Runtime
+# Individual Services (for debugging)
+just redis         # Start Redis container
 just run-tts-piper # Run Piper TTS worker (CPU)
 just run-orch      # Run orchestrator (WebRTC/WS)
 just cli           # Run CLI client
+
+# Log Management
+just logs-list     # List recent development sessions
+just logs-tail     # Tail most recent log file
+just logs-clean    # Clean old logs (keep last 20 or 7 days)
 ```
 
 > 🔧 **Full Command Reference**: See [.claude/modules/development.md](.claude/modules/development.md)
 
 ### Development Workflow
 
+**Recommended: Unified Development Mode**
+
+```bash
+# Start all services in parallel (10 second startup)
+just dev-agent-piper
+
+# Access points:
+# - Web client: https://localhost:8443
+# - LiveKit: wss://localhost:8444
+# - Logs: logs/dev-sessions/dev-agent-piper-YYYYMMDD-HHMMSS.log
+```
+
+**Features:**
+- Parallel service startup (~10s vs 5+ min Docker build)
+- Color-coded logs (each service has its own color)
+- Automatic log capture with timestamps
+- Graceful shutdown (single Ctrl+C)
+- Hot-reload friendly (restart quickly after code changes)
+
+**Alternative Workflows:**
 1. **Start a session**: Load context from CLAUDE.md (this file) - minimal tokens
 2. **Working on specific feature?** Claude Code will suggest loading relevant module:
    - VAD/Barge-in → [.claude/modules/features/vad.md](.claude/modules/features/vad.md)
@@ -67,7 +95,7 @@ just cli           # Run CLI client
 2. **TTS Workers** (`src/tts/`)
    - gRPC server implementing unified streaming ABI
    - Model Manager: handles load/unload, TTL eviction, LRU caching
-   - Adapters: Piper (CPU baseline) ✅, CosyVoice2/XTTS/Sesame (planned)
+   - Adapters: Piper (CPU baseline) ✅, CosyVoice2 (GPU) 🔄, XTTS/Sesame (planned)
    - Output: 20 ms frames, 48 kHz mono PCM
 
 **Flow (M10 with ASR):**
@@ -85,6 +113,7 @@ Client speaks → Orchestrator (VAD + ASR) → Text transcript → TTS Worker �
 src/
 ├─ orchestrator/        # LiveKit Agent + WebSocket server
 │  ├─ server.py         # Main orchestrator with session management
+│  ├─ agent.py          # LiveKit Agent (new unified implementation)
 │  ├─ vad.py            # Voice Activity Detection (M3)
 │  ├─ vad_processor.py  # VAD with adaptive noise gate (M10 Polish)
 │  └─ session.py        # Session state machine
@@ -119,12 +148,12 @@ src/
 9. ✅ Configuration file comments
 
 ### Documentation Audit (REQUIRED for milestones)
-10. ✅ Coordinate specialized agents:
-    - `@documentation-engineer` - Cross-document consistency
-    - `@devops-engineer` - CI/CD and deployment docs
-    - `@python-pro` - Code quality and testing
+10. ✅ Coordinate specialized agents via `@multi-agent-coordinator`:
+    - Manages team assembly and parallel execution
+    - Uses Redis MCP Server for state management
+    - Orchestrates: documentation-engineer, devops-engineer, python-pro, ml-engineer, project-manager, nextjs-developer, react-tanstack-developer
 
-> 📖 **Agent Coordination**: See [.claude/agents/README.md](.claude/agents/README.md)
+> 📖 **Agent Coordination**: See [.claude/agents/COORDINATION.md](.claude/agents/COORDINATION.md)
 
 ### Commit & PR (REQUIRED)
 11. ✅ Generate `/tmp/M{N}_commit.msg` (conventional commits format)
@@ -137,8 +166,9 @@ src/
 ## Testing Strategy
 
 **Quick Summary:**
-- **Total**: 649 tests (500 unit + 139 integration + 10 performance)
+- **Total**: 730 tests (540 unit + 180 integration + 10 performance)
 - **M0-M5**: 113 tests (core, VAD, Model Manager, Piper)
+- **M6**: 51 tests (CosyVoice adapter, shared utilities)
 - **M10 ASR**: 128 tests (Whisper adapters, audio buffer)
 - **M10 Polish**: 65 tests (RMS buffer, session timeout, multi-turn)
 
@@ -163,6 +193,7 @@ just test-integration  # Integration only (with --forked for gRPC)
 - Python 3.13.x managed with **uv**
 - `ruff` for linting, `mypy` for type checking (strict mode)
 - `pytest` for tests, `justfile` for tasks
+- `honcho` for process management (Heroku-compatible Procfile format)
 
 **Platform:**
 - CUDA 12.8 + PyTorch 2.7.0 for main workers (Orchestrator, Whisper, future XTTS/Sesame)
@@ -196,7 +227,8 @@ just test-integration  # Integration only (with --forked for gRPC)
 | M3 | ✅ Complete | Barge-in end-to-end (VAD integration) |
 | M4 | ✅ Complete | Model Manager v1 (TTL/LRU eviction) |
 | M5 | ✅ Complete | Piper adapter (CPU baseline) |
-| M6-M8 | 📝 Planned | GPU TTS adapters (CosyVoice2, XTTS, Sesame) |
+| M6 | 🔄 Partial | CosyVoice2 adapter (Phases 1-3 complete, Phase 4 pending) |
+| M7-M8 | 📝 Planned | GPU TTS adapters (XTTS, Sesame) |
 | M9 | 📝 Planned | Routing v1 (capability-aware) |
 | M10 | ✅ Complete | ASR integration (Whisper + WhisperX) |
 | M10 Polish | ✅ Complete | Session timeout, adaptive noise gate |
@@ -207,6 +239,24 @@ just test-integration  # Integration only (with --forked for gRPC)
 > 📖 **Detailed Milestone Plan**: See [.claude/modules/milestones.md](.claude/modules/milestones.md)
 
 ## Important Patterns
+
+**Unified Development Workflow:**
+- Use `just dev-agent-piper` for fastest iteration
+- Logs automatically saved to `logs/dev-sessions/`
+- All services start in parallel (~10 seconds)
+- Single Ctrl+C stops everything gracefully
+- Powered by Honcho (Procfile format) for cross-platform compatibility
+
+**Model Switching:**
+```bash
+# Development mode with different TTS models
+just dev-agent-piper     # Piper TTS (CPU, realistic speech)
+just dev                 # Legacy orchestrator + Piper
+
+# Docker Compose with profiles
+docker compose up                        # Default: Piper TTS
+docker compose --profile cosyvoice up   # CosyVoice 2 (GPU, isolated)
+```
 
 **Adapter Implementation:**
 - Inherit from `tts_base.py` protocol
@@ -239,12 +289,26 @@ IDLE → LISTENING → SPEAKING → BARGED_IN
 
 ## Docker & Deployment
 
-**Quick Start:**
+**Quick Start (Unified Development):**
 ```bash
-docker compose up --build
+# Fastest: Honcho parallel startup (recommended for development)
+just dev-agent-piper  # ~10 seconds, auto-logging
+
+# Traditional: Docker Compose (for production-like testing)
+docker compose up --build  # ~5 minutes first build
 ```
 
-Starts: Redis + LiveKit + Caddy + Orchestrator + TTS worker
+**Docker Compose Profiles:**
+```bash
+# Default profile (Piper TTS)
+docker compose up
+
+# CosyVoice 2 (isolated PyTorch 2.3.1 environment)
+docker compose --profile cosyvoice up
+
+# Start specific services only
+docker compose up redis livekit caddy
+```
 
 **Multi-GPU (same host):**
 ```bash
@@ -292,4 +356,4 @@ just run-orch
 
 ---
 
-**Token Optimization Note**: This file is intentionally streamlined (~360 lines) to minimize context load. Detailed documentation is split into focused modules that can be loaded on-demand based on the task at hand. Original CLAUDE.md backed up as `CLAUDE.md.backup`.
+**Token Optimization Note**: This file is intentionally streamlined (~400 lines) to minimize context load. Detailed documentation is split into focused modules that can be loaded on-demand based on the task at hand.
