@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "version": "1.0.0",
+  "description": "Context-aware module loading triggers for Claude Code",
+  "last_updated": "2025-10-17",
+
+  "triggers": [
+    {
+      "name": "VAD Implementation",
+      "file_patterns": [
+        "src/orchestrator/vad.py",
+        "src/orchestrator/vad_processor.py",
+        "src/orchestrator/audio/buffer.py",
+        "tests/unit/orchestrator/test_vad.py",
+        "tests/integration/test_vad_integration.py"
+      ],
+      "modules": [
+        ".claude/modules/features/vad.md",
+        ".claude/modules/architecture.md#orchestrator-layer"
+      ],
+      "keywords": [
+        "VAD",
+        "voice activity detection",
+        "barge-in",
+        "noise gate",
+        "adaptive threshold"
+      ],
+      "priority": "high"
+    },
+    {
+      "name": "ASR Integration",
+      "file_patterns": [
+        "src/asr/**/*.py",
+        "tests/unit/asr/**/*.py",
+        "tests/integration/test_whisper*.py"
+      ],
+      "modules": [
+        ".claude/modules/features/asr.md",
+        ".claude/modules/architecture.md#orchestrator-layer",
+        "docs/WHISPER_ADAPTER.md"
+      ],
+      "keywords": [
+        "ASR",
+        "automatic speech recognition",
+        "whisper",
+        "whispex",
+        "transcription"
+      ],
+      "priority": "high"
+    },
+    {
+      "name": "Session Management",
+      "file_patterns": [
+        "src/orchestrator/session.py",
+        "src/orchestrator/config.py",
+        "tests/unit/orchestrator/test_session.py",
+        "tests/integration/test_multi_turn*.py"
+      ],
+      "modules": [
+        ".claude/modules/features/session-management.md",
+        ".claude/modules/features/vad.md#state-aware-vad-gating",
+        ".claude/modules/architecture.md#state-machine"
+      ],
+      "keywords": [
+        "session",
+        "multi-turn",
+        "idle timeout",
+        "WAITING_FOR_INPUT",
+        "state machine"
+      ],
+      "priority": "high"
+    },
+    {
+      "name": "Model Manager",
+      "file_patterns": [
+        "src/tts/model_manager.py",
+        "tests/unit/tts/test_model_manager.py",
+        "tests/integration/test_model_lifecycle.py"
+      ],
+      "modules": [
+        ".claude/modules/features/model-manager.md",
+        ".claude/modules/architecture.md#tts-worker-layer"
+      ],
+      "keywords": [
+        "model manager",
+        "model lifecycle",
+        "TTL eviction",
+        "LRU eviction",
+        "load model",
+        "unload model"
+      ],
+      "priority": "high"
+    },
+    {
+      "name": "TTS Adapters",
+      "file_patterns": [
+        "src/tts/adapters/*.py",
+        "tests/unit/tts/adapters/*.py",
+        "tests/integration/test_*_integration.py"
+      ],
+      "modules": [
+        ".claude/modules/adapters/README.md",
+        ".claude/modules/adapters/template.md",
+        ".claude/modules/architecture.md#tts-worker-layer"
+      ],
+      "keywords": [
+        "TTS adapter",
+        "synthesize",
+        "audio frame",
+        "resampling",
+        "framing"
+      ],
+      "priority": "medium"
+    },
+    {
+      "name": "Piper Adapter",
+      "file_patterns": [
+        "src/tts/adapters/adapter_piper.py",
+        "tests/unit/tts/adapters/test_adapter_piper.py",
+        "tests/integration/test_piper*.py",
+        "voicepacks/piper/**/*"
+      ],
+      "modules": [
+        ".claude/modules/adapters/piper.md",
+        ".claude/modules/adapters/template.md",
+        ".claude/modules/features/model-manager.md"
+      ],
+      "keywords": [
+        "piper",
+        "ONNX",
+        "CPU baseline",
+        "22050Hz",
+        "voicepack"
+      ],
+      "priority": "medium"
+    },
+    {
+      "name": "CosyVoice Adapter",
+      "file_patterns": [
+        "src/tts/adapters/adapter_cosyvoice.py",
+        "tests/unit/tts/adapters/test_adapter_cosyvoice.py",
+        "tests/integration/test_cosyvoice*.py",
+        "voicepacks/cosyvoice2/**/*",
+        "docs/COSYVOICE*.md",
+        "scripts/setup_cosyvoice*.sh"
+      ],
+      "modules": [
+        ".claude/modules/adapters/template.md",
+        "docs/COSYVOICE_PYTORCH_CONFLICT.md",
+        "docs/VOICEPACK_COSYVOICE2.md",
+        ".claude/modules/milestones.md#m6-cosyvoice2-adapter"
+      ],
+      "keywords": [
+        "cosyvoice",
+        "cosyvoice2",
+        "GPU TTS",
+        "expressive",
+        "PyTorch conflict"
+      ],
+      "priority": "medium"
+    },
+    {
+      "name": "Orchestrator",
+      "file_patterns": [
+        "src/orchestrator/server.py",
+        "src/orchestrator/routing.py",
+        "src/orchestrator/registry.py",
+        "tests/unit/orchestrator/*.py",
+        "tests/integration/test_full_pipeline.py"
+      ],
+      "modules": [
+        ".claude/modules/architecture.md#orchestrator-layer",
+        ".claude/modules/features/vad.md",
+        ".claude/modules/features/asr.md",
+        ".claude/modules/features/session-management.md"
+      ],
+      "keywords": [
+        "orchestrator",
+        "LiveKit",
+        "WebSocket",
+        "routing",
+        "worker selection"
+      ],
+      "priority": "high"
+    },
+    {
+      "name": "Audio Processing",
+      "file_patterns": [
+        "src/tts/audio/*.py",
+        "src/orchestrator/audio/*.py",
+        "tests/unit/tts/audio/*.py",
+        "tests/unit/orchestrator/audio/*.py"
+      ],
+      "modules": [
+        ".claude/modules/adapters/template.md#audio-processing",
+        ".claude/modules/features/vad.md#audio-processing-pipeline",
+        ".claude/modules/architecture.md#audio-flow"
+      ],
+      "keywords": [
+        "audio processing",
+        "resampling",
+        "framing",
+        "RMS buffer",
+        "48kHz",
+        "16kHz"
+      ],
+      "priority": "medium"
+    },
+    {
+      "name": "Testing & CI/CD",
+      "file_patterns": [
+        "tests/**/*.py",
+        ".github/workflows/*.yml",
+        "pytest.ini",
+        "codecov.yml"
+      ],
+      "modules": [
+        ".claude/modules/testing.md",
+        ".claude/modules/development.md#quality-ci"
+      ],
+      "keywords": [
+        "testing",
+        "pytest",
+        "CI/CD",
+        "GitHub Actions",
+        "code coverage"
+      ],
+      "priority": "medium"
+    },
+    {
+      "name": "Development Environment",
+      "file_patterns": [
+        "pyproject.toml",
+        "uv.lock",
+        "justfile",
+        "Dockerfile*",
+        "docker-compose.yml",
+        "configs/**/*.yaml"
+      ],
+      "modules": [
+        ".claude/modules/development.md",
+        ".claude/modules/testing.md#running-ci-locally"
+      ],
+      "keywords": [
+        "development",
+        "environment",
+        "dependencies",
+        "configuration",
+        "docker"
+      ],
+      "priority": "low"
+    },
+    {
+      "name": "Milestone Implementation",
+      "file_patterns": [
+        "project_documentation/INCREMENTAL_IMPLEMENTATION_PLAN.md",
+        "docs/CURRENT_STATUS.md"
+      ],
+      "modules": [
+        ".claude/modules/milestones.md",
+        ".claude/agents/COORDINATION.md"
+      ],
+      "keywords": [
+        "milestone",
+        "implementation",
+        "roadmap",
+        "exit criteria",
+        "acceptance criteria"
+      ],
+      "priority": "low"
+    }
+  ],
+
+  "auto_load_rules": {
+    "description": "Rules for automatic module loading based on user intent",
+    "rules": [
+      {
+        "condition": "Working on files matching pattern",
+        "action": "Suggest loading related modules",
+        "verbosity": "low"
+      },
+      {
+        "condition": "User mentions keyword in query",
+        "action": "Proactively load relevant modules",
+        "verbosity": "medium"
+      },
+      {
+        "condition": "Multiple related files being modified",
+        "action": "Load all relevant modules automatically",
+        "verbosity": "high"
+      }
+    ],
+    "priority_thresholds": {
+      "high": "Always suggest, load on 2+ file matches",
+      "medium": "Suggest on 3+ file matches",
+      "low": "Suggest only on explicit request"
+    }
+  },
+
+  "module_metadata": {
+    "description": "Token estimates and loading recommendations",
+    "modules": [
+      {
+        "path": ".claude/modules/architecture.md",
+        "estimated_tokens": 1800,
+        "load_time": "immediate",
+        "dependencies": []
+      },
+      {
+        "path": ".claude/modules/milestones.md",
+        "estimated_tokens": 3000,
+        "load_time": "on-demand",
+        "dependencies": []
+      },
+      {
+        "path": ".claude/modules/development.md",
+        "estimated_tokens": 2500,
+        "load_time": "on-demand",
+        "dependencies": []
+      },
+      {
+        "path": ".claude/modules/testing.md",
+        "estimated_tokens": 2800,
+        "load_time": "on-demand",
+        "dependencies": []
+      },
+      {
+        "path": ".claude/modules/features/vad.md",
+        "estimated_tokens": 1200,
+        "load_time": "immediate",
+        "dependencies": [".claude/modules/architecture.md"]
+      },
+      {
+        "path": ".claude/modules/features/asr.md",
+        "estimated_tokens": 450,
+        "load_time": "immediate",
+        "dependencies": [".claude/modules/architecture.md", "docs/WHISPER_ADAPTER.md"]
+      },
+      {
+        "path": ".claude/modules/features/model-manager.md",
+        "estimated_tokens": 800,
+        "load_time": "immediate",
+        "dependencies": [".claude/modules/architecture.md"]
+      },
+      {
+        "path": ".claude/modules/features/session-management.md",
+        "estimated_tokens": 800,
+        "load_time": "immediate",
+        "dependencies": [".claude/modules/features/vad.md"]
+      },
+      {
+        "path": ".claude/modules/adapters/piper.md",
+        "estimated_tokens": 900,
+        "load_time": "immediate",
+        "dependencies": [".claude/modules/adapters/template.md"]
+      },
+      {
+        "path": ".claude/modules/adapters/template.md",
+        "estimated_tokens": 1500,
+        "load_time": "on-demand",
+        "dependencies": []
+      },
+      {
+        "path": ".claude/modules/adapters/README.md",
+        "estimated_tokens": 900,
+        "load_time": "immediate",
+        "dependencies": []
+      }
+    ]
+  }
+}

@@ -48,7 +48,12 @@
       "Bash(npm run build)",
       "Bash(cat:*)",
       "Bash(timeout 5 uv run python -m src.tts.worker:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "mcp__RedisMCPServer__hgetall",
+      "mcp__taskqueue__list_projects",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Read(//home/gerald/git/mycelium/**)"
     ],
     "deny": [],
     "ask": []
