@@ -107,6 +107,7 @@ markers = [
     "livekit: Tests requiring LiveKit container",
     "performance: Performance benchmark tests",
     "slow: Tests that take longer to run (> 5s)",
+    "gpu: Tests requiring GPU hardware (may skip if unavailable)",
 ]
 
 [tool.coverage.run]

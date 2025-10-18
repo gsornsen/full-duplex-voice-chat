@@ -3,6 +3,9 @@
 This module implements the ModelManager class which handles all TTS model lifecycle
 operations including loading, unloading, reference counting, TTL-based eviction,
 and LRU-based capacity management.
+
+Adapter imports are lazy to support container isolation (e.g., CosyVoice container
+doesn't need Piper dependencies).
 """
 
 import asyncio
@@ -11,8 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Only import MockTTSAdapter at module level (no external dependencies)
 from src.tts.adapters.adapter_mock import MockTTSAdapter
-from src.tts.adapters.adapter_piper import PiperTTSAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,10 @@ class ModelManager:
     - TTL-based eviction for idle models
     - LRU-based eviction when resident capacity is exceeded
     - Thread-safe operations with semaphore control
+
+    Adapter imports are lazy (inside _load_model_impl) to support container
+    isolation. Each TTS worker container only needs its specific adapter
+    dependencies installed.
 
     Attributes:
         default_model_id: Required default model loaded on startup
@@ -380,13 +387,18 @@ class ModelManager:
             return info
 
     async def _load_model_impl(self, model_id: str) -> Any:
-        """Internal implementation of model loading.
+        """Internal implementation of model loading with lazy adapter imports.
 
         Routes to the appropriate adapter based on model_id prefix:
-        - "piper-*": PiperTTSAdapter (M5)
-        - Others: MockTTSAdapter (M1-M4)
+        - "piper-*": PiperTTSAdapter (M5) - lazy import to avoid piper-tts dependency
+        - "cosyvoice2-*": CosyVoiceAdapter (M6) - lazy import for PyTorch 2.3.1 isolation
+        - Others: MockTTSAdapter (M1-M4) - imported at module level (no dependencies)
 
-        Future milestones (M6-M8) will add more adapter types.
+        Lazy imports enable container isolation: each TTS worker container only needs
+        its specific adapter's dependencies installed. For example, the CosyVoice
+        container (PyTorch 2.3.1 + CUDA 12.1) doesn't need piper-tts package.
+
+        Future milestones (M7-M8) will add more adapter types with lazy imports.
 
         Args:
             model_id: Model identifier
@@ -395,12 +407,15 @@ class ModelManager:
             Model instance
 
         Raises:
-            ModelNotFoundError: If Piper voicepack not found
+            ModelNotFoundError: If voicepack not found
         """
         logger.info("Loading model implementation", extra={"model_id": model_id})
 
         # Route to Piper adapter for piper-* models (M5)
+        # Lazy import to avoid requiring piper-tts in all containers
         if model_id.startswith("piper-"):
+            from src.tts.adapters.adapter_piper import PiperTTSAdapter
+
             # Extract voice name from model_id
             # (e.g., "piper-en-us-lessac-medium" -> "en-us-lessac-medium")
             voice_name = model_id.replace("piper-", "", 1)
@@ -414,7 +429,27 @@ class ModelManager:
             piper_adapter: Any = PiperTTSAdapter(model_id=model_id, model_path=voicepack_path)
             return piper_adapter
 
-        # Default to mock adapter for testing
+        # Route to CosyVoice 2 adapter for cosyvoice2-* models (M6)
+        # Lazy import to support PyTorch 2.3.1 isolation in CosyVoice container
+        if model_id.startswith("cosyvoice2-"):
+            from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+
+            # Extract voice name from model_id
+            # (e.g., "cosyvoice2-en-base" -> "en-base")
+            voice_name = model_id.replace("cosyvoice2-", "", 1)
+            voicepack_path = Path(f"voicepacks/cosyvoice/{voice_name}")
+
+            if not voicepack_path.exists():
+                raise ModelNotFoundError(
+                    f"Voicepack not found for model {model_id}: {voicepack_path}"
+                )
+
+            cosyvoice_adapter: Any = CosyVoiceAdapter(
+                model_id=model_id, model_path=voicepack_path
+            )
+            return cosyvoice_adapter
+
+        # Default to mock adapter for testing (imported at module level)
         mock_adapter: Any = MockTTSAdapter(model_id=model_id)
         return mock_adapter
 
