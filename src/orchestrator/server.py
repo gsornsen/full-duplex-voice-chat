@@ -386,6 +386,23 @@ class OrchestratorServer:
 
         logger.info(f"Synthesizing text for session {session_id}: '{text[:50]}...'")
 
+        # Check if worker is available before attempting synthesis
+        if not worker_client.is_connected:
+            logger.warning(
+                "TTS worker not available, checking connection",
+                extra={"session_id": session_id},
+            )
+            if not await worker_client.check_connection():
+                logger.error(
+                    "TTS worker unavailable, cannot synthesize",
+                    extra={"session_id": session_id},
+                )
+                await self._send_text_to_client(
+                    session_manager,
+                    "TTS service is currently unavailable. Please try again later.",
+                )
+                return
+
         # Transition to SPEAKING state
         session_manager.transition_state(SessionState.SPEAKING)
 
@@ -697,6 +714,22 @@ async def handle_session(
     try:
         logger.info("Starting session handler", extra={"session_id": session_id})
 
+        # Check if worker is available before starting session
+        if not worker_client.is_connected:
+            logger.warning(
+                "TTS worker not available at session start, checking connection",
+                extra={"session_id": session_id},
+            )
+            if not await worker_client.check_connection():
+                logger.error(
+                    "TTS worker unavailable, cannot start session",
+                    extra={"session_id": session_id},
+                )
+                raise RuntimeError(
+                    f"TTS worker not available at {worker_client.address}. "
+                    f"Please check that the worker is running and accessible."
+                )
+
         # Start TTS session with worker
         model_id = "piper-en-us-lessac-medium"  # M5: Use Piper TTS
         await worker_client.start_session(session_id, model_id)
@@ -995,7 +1028,6 @@ async def start_server(config_path: Path, orchestrator: OrchestratorServer | Non
 
     Raises:
         RuntimeError: If configuration is invalid
-        ConnectionError: If worker connection fails
     """
     # Load config
     config = OrchestratorConfig.from_yaml(config_path)
@@ -1075,22 +1107,44 @@ async def start_server(config_path: Path, orchestrator: OrchestratorServer | Non
     if worker_addr.startswith("grpc://"):
         worker_addr = worker_addr[7:]
 
-    logger.info("Connecting to TTS worker", extra={"address": worker_addr})
+    logger.info(
+        "Initializing TTS worker client with graceful degradation",
+        extra={"address": worker_addr},
+    )
 
     # Create worker client (shared across sessions for now)
     worker_client = TTSWorkerClient(worker_addr)
+
+    # Try to connect with retries, but don't block startup if worker is unavailable
     try:
-        await worker_client.connect()
-        logger.info("Connected to TTS worker", extra={"address": worker_addr})
+        await worker_client.connect(max_retries=3, initial_backoff_s=1.0, timeout_s=5.0)
+        logger.info(
+            "Connected to TTS worker successfully",
+            extra={"address": worker_addr, "connected": worker_client.is_connected},
+        )
     except Exception as e:
-        raise ConnectionError(
-            f"gRPC worker unavailable at {worker_addr}. "
-            f"Cause: Worker process not running or network issue. "
-            f"Resolution: 1) Check worker is running: docker ps | grep tts-worker. "
-            f"2) Verify network connectivity: nc -zv localhost 7001. "
-            f"3) Check worker logs: docker logs tts-worker-0. "
-            f"See: docs/runbooks/GRPC_WORKER.md"
-        ) from e
+        logger.warning(
+            "TTS worker not immediately available, orchestrator will continue startup. "
+            "Worker connection will be retried when sessions are created.",
+            extra={
+                "address": worker_addr,
+                "error": str(e),
+                "recommendation": (
+                    "Check that TTS worker is running: docker ps | grep tts-worker. "
+                    "Verify network connectivity: nc -zv localhost 7001. "
+                    "Check worker logs: docker logs tts-worker-0."
+                ),
+            },
+        )
+
+        # Start a background task to periodically check for worker availability
+        async def monitor_worker_connection() -> None:
+            """Background task to monitor worker connection and log status changes."""
+            while True:
+                await asyncio.sleep(10.0)  # Check every 10 seconds
+                await worker_client.check_connection()
+
+        asyncio.create_task(monitor_worker_connection())
 
     # Start health check HTTP server (port 8081 by default)
     health_port = ws_config.port + 1  # Use next port after WebSocket
@@ -1108,7 +1162,11 @@ async def start_server(config_path: Path, orchestrator: OrchestratorServer | Non
     try:
         logger.info(
             "Orchestrator server ready",
-            extra={"vad_enabled": config.vad.enabled, "asr_enabled": config.asr.enabled},
+            extra={
+                "vad_enabled": config.vad.enabled,
+                "asr_enabled": config.asr.enabled,
+                "tts_worker_connected": worker_client.is_connected,
+            },
         )
 
         # Create tasks for both transports

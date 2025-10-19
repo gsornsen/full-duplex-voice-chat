@@ -12,14 +12,16 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from enum import Enum
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
 from piper import PiperVoice
-from scipy import signal
+
+from src.tts.audio.framing import repacketize_to_20ms
+from src.tts.audio.resampling import resample_audio
+from src.tts.tts_base import AdapterState
 
 # Constants
 TARGET_SAMPLE_RATE_HZ: Final[int] = 48000  # Required output sample rate
@@ -29,15 +31,6 @@ INTER_FRAME_DELAY_MS: Final[float] = 2.0  # Small delay to simulate streaming
 WARMUP_TEXT: Final[str] = "Testing warmup synthesis for model initialization."
 
 logger = logging.getLogger(__name__)
-
-
-class AdapterState(Enum):
-    """State machine for the Piper adapter."""
-
-    IDLE = "idle"
-    SYNTHESIZING = "synthesizing"
-    PAUSED = "paused"
-    STOPPED = "stopped"
 
 
 class PiperTTSAdapter:
@@ -171,11 +164,13 @@ class PiperTTSAdapter:
                 # Resample to 48kHz if needed
                 if self.native_sample_rate != TARGET_SAMPLE_RATE_HZ:
                     audio = await asyncio.to_thread(
-                        self._resample_audio, audio, self.native_sample_rate, TARGET_SAMPLE_RATE_HZ
+                        resample_audio, audio, self.native_sample_rate, TARGET_SAMPLE_RATE_HZ
                     )
 
                 # Repacketize to 20ms frames
-                frames = await asyncio.to_thread(self._repacketize_to_20ms, audio)
+                frames = await asyncio.to_thread(
+                    repacketize_to_20ms, audio, sample_rate=TARGET_SAMPLE_RATE_HZ
+                )
 
                 logger.debug(
                     "Generated frames for chunk",
@@ -251,67 +246,6 @@ class PiperTTSAdapter:
             return np.zeros(0, dtype=np.int16)
 
         return np.concatenate(audio_chunks)
-
-    def _resample_audio(
-        self, audio: NDArray[np.int16], source_rate: int, target_rate: int
-    ) -> NDArray[np.int16]:
-        """Resample audio to target sample rate using scipy.
-
-        Args:
-            audio: Input audio samples (int16)
-            source_rate: Source sample rate
-            target_rate: Target sample rate
-
-        Returns:
-            Resampled audio samples (int16)
-        """
-        if source_rate == target_rate:
-            return audio
-
-        # Handle empty audio
-        if len(audio) == 0:
-            return audio
-
-        # Convert to float for resampling
-        audio_float = audio.astype(np.float32)
-
-        # Calculate resampling ratio
-        num_samples = int(len(audio_float) * target_rate / source_rate)
-
-        # Resample using scipy
-        resampled = signal.resample(audio_float, num_samples)
-
-        # Convert back to int16
-        return resampled.astype(np.int16)  # type: ignore[no-any-return]
-
-    def _repacketize_to_20ms(self, audio: NDArray[np.int16]) -> list[bytes]:
-        """Repacketize audio into 20ms frames at 48kHz.
-
-        Args:
-            audio: Audio samples at 48kHz (int16)
-
-        Returns:
-            List of 20ms PCM frames as bytes (int16 little-endian)
-        """
-        frames: list[bytes] = []
-
-        # Split audio into 20ms frames (960 samples at 48kHz)
-        for i in range(0, len(audio), SAMPLES_PER_FRAME):
-            frame_samples = audio[i : i + SAMPLES_PER_FRAME]
-
-            # Pad last frame if needed
-            if len(frame_samples) < SAMPLES_PER_FRAME:
-                frame_samples = np.pad(
-                    frame_samples,
-                    (0, SAMPLES_PER_FRAME - len(frame_samples)),
-                    mode="constant",
-                )
-
-            # Convert to bytes (int16 little-endian)
-            frame_bytes = frame_samples.tobytes()
-            frames.append(frame_bytes)
-
-        return frames
 
     async def control(self, command: str) -> None:
         """Handle control commands with < 50ms response time.
@@ -439,7 +373,7 @@ class PiperTTSAdapter:
         # Resample and repacketize (same as normal synthesis)
         if self.native_sample_rate != TARGET_SAMPLE_RATE_HZ:
             audio = await asyncio.to_thread(
-                self._resample_audio, audio, self.native_sample_rate, TARGET_SAMPLE_RATE_HZ
+                resample_audio, audio, self.native_sample_rate, TARGET_SAMPLE_RATE_HZ
             )
 
         # Just measure, don't repacketize

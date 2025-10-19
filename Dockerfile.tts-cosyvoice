@@ -1,0 +1,94 @@
+# Dockerfile for CosyVoice 2 TTS Worker
+#
+# This Dockerfile creates an isolated environment for CosyVoice 2 with PyTorch 2.3.1 + CUDA 12.1
+# to avoid version conflicts with the main project (PyTorch 2.7.0 + CUDA 12.8).
+#
+# Build: docker build -f Dockerfile.tts-cosyvoice -t tts-cosyvoice:latest .
+# Run: docker compose up tts-cosyvoice
+
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Python 3.10 and system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-venv \
+    python3.10-dev \
+    python3-pip \
+    git \
+    wget \
+    curl \
+    build-essential \
+    libsndfile1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.10 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+
+# Create app directory
+WORKDIR /app
+
+# Install uv for fast dependency management
+RUN pip3 install --no-cache-dir uv
+
+# Copy only dependency files first for better layer caching
+COPY pyproject.toml ./
+
+# Install PyTorch 2.3.1 with CUDA 12.1 support (CosyVoice requirement)
+RUN pip3 install --no-cache-dir \
+    torch==2.3.1 \
+    torchaudio==2.3.1 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Install CosyVoice 2 dependencies
+# Note: CosyVoice repository will be cloned at runtime or mounted as volume
+RUN pip3 install --no-cache-dir \
+    numpy==1.26.4 \
+    scipy==1.13.0 \
+    soundfile \
+    librosa \
+    modelscope \
+    pydantic \
+    pyyaml \
+    grpcio \
+    grpcio-tools \
+    protobuf \
+    redis
+
+# Copy application code
+COPY src/ ./src/
+COPY tests/ ./tests/
+COPY configs/ ./configs/
+
+# Generate gRPC stubs
+RUN python3 -m grpc_tools.protoc \
+    -I src/rpc \
+    --python_out=src/rpc/generated \
+    --grpc_python_out=src/rpc/generated \
+    src/rpc/tts.proto
+
+# Patch generated protos
+RUN sed -i \
+  's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' \
+  src/rpc/generated/tts_pb2_grpc.py
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_VISIBLE_DEVICES=0
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+
+# Expose gRPC port
+EXPOSE 7001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python3 -c "import grpc; channel = grpc.insecure_channel('localhost:7001'); channel.close()" || exit 1
+
+# Default command (DEFAULT_MODEL can be overridden via environment variable in docker-compose.yml)
+CMD ["python3", "-m", "src.tts.worker", \
+     "--adapter", "cosyvoice2", \
+     "--port", "7001"]

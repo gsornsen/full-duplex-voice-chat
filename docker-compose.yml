@@ -68,17 +68,23 @@ services:
       - tts-network
     restart: unless-stopped
 
-  # Orchestrator service
+  # Orchestrator service - supports both LiveKit Agent and Legacy WebSocket modes
+  # Mode selection via ORCHESTRATOR_MODE environment variable:
+  #   - agent (default): LiveKit Agent mode for web frontend
+  #   - legacy: WebSocket server mode for CLI client
   orchestrator:
     build:
       context: .
       dockerfile: Dockerfile.orchestrator
     container_name: orchestrator
-    command: ["uv", "run", "python", "-m", "src.orchestrator.server", "--config", "configs/orchestrator.docker.yaml"]
+    # Use entrypoint script to select mode based on ORCHESTRATOR_MODE
+    entrypoint: ["/app/docker/entrypoint-orchestrator.sh"]
     ports:
-      - "8080:8080"  # WebSocket
-      - "8081:8081"  # Health check HTTP
+      - "8080:8080"  # WebSocket (legacy mode only)
+      - "8081:8081"  # Health check HTTP (legacy mode only)
     environment:
+      # Orchestrator mode: agent (default) or legacy
+      - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
       # Use internal Docker DNS and correct Redis port (6379 inside container)
       - REDIS_URL=redis://redis:6379
       - LIVEKIT_URL=ws://livekit:7880
@@ -88,6 +94,11 @@ services:
       - ASR_ADAPTER=whisperx
       - ASR_MODEL_SIZE=small
       - ASR_DEVICE=auto
+      # Required for agent mode (OpenAI LLM integration)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # TTS worker address (Docker network alias for agent mode)
+      - TTS_WORKER_ADDRESS=tts:7001
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
     depends_on:
       redis:
         condition: service_healthy
@@ -96,13 +107,17 @@ services:
       tts0:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      # Health check only works in legacy mode (agent mode doesn't expose HTTP endpoint)
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 0"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
     networks:
       - tts-network
+    volumes:
+      # Mount entrypoint script
+      - ./docker/entrypoint-orchestrator.sh:/app/docker/entrypoint-orchestrator.sh:ro
     deploy:
       resources:
         reservations:
@@ -136,7 +151,9 @@ services:
       retries: 5
       start_period: 60s
     networks:
-      - tts-network
+      tts-network:
+        aliases:
+          - tts  # Common alias for orchestrator to connect regardless of model
     volumes:
       - ./voicepacks:/app/voicepacks:ro
     deploy:
@@ -146,6 +163,57 @@ services:
             - driver: nvidia
               # device_ids: ['0']
               capabilities: [gpu]
+
+  # CosyVoice 2 TTS worker (GPU, isolated PyTorch 2.3.1 environment)
+  # This service uses a separate Dockerfile to avoid PyTorch version conflicts
+  # with the main project (PyTorch 2.7.0 vs CosyVoice requirement of 2.3.1)
+  tts-cosyvoice:
+    build:
+      context: .
+      dockerfile: Dockerfile.tts-cosyvoice
+    container_name: tts-cosyvoice
+    ports:
+      - "7002:7001"  # gRPC (expose on host 7002, container uses 7001)
+      - "9091:9091"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-cosyvoice
+      - WORKER_PORT=7001  # Use same internal port as tts0 for network alias
+      - DEFAULT_MODEL_ID=cosyvoice2-en-base
+      - TTL_MS=600000
+      - RESIDENT_CAP=2
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env.cosyvoice  # Optional: override with custom configuration
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s  # CosyVoice model loading takes longer
+    networks:
+      tts-network:
+        aliases:
+          - tts  # Common alias for orchestrator to connect regardless of model
+    volumes:
+      # Mount voicepacks directory for CosyVoice models
+      - ./voicepacks/cosyvoice:/app/voicepacks/cosyvoice:ro
+      # Optional: Mount CosyVoice repository if needed
+      # - ./third_party/CosyVoice:/app/CosyVoice:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+        limits:
+          memory: 8G  # CosyVoice 2 needs ~6-8GB VRAM
+    profiles:
+      - cosyvoice  # Only start with: docker compose --profile cosyvoice up
 
 networks:
   tts-network:
@@ -158,4 +226,3 @@ volumes:
     driver: local
   caddy-logs:
     driver: local
-  

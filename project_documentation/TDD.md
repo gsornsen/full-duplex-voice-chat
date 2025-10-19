@@ -114,7 +114,7 @@ service TTS {
   * Per-model refcounts to prevent mid-stream eviction.
 * **Warmup**:
 
-  * After load, synthesize a small hidden utterance (e.g., “warm up”) to fill caches and prime kernels.
+  * After load, synthesize a small hidden utterance (e.g., "warm up") to fill caches and prime kernels.
 
 **Config (worker)**
 
@@ -165,22 +165,117 @@ model_manager:
   * Zero-shot & cloning; cache speaker embeddings; optional ONNX export for CPU.
 * **CosyVoice 2**
 
-  * Strong “unstated” emotion; expose explicit emotion controls in `settings` as available.
+  * Strong "unstated" emotion; expose explicit emotion controls in `settings` as available.
+
+### CosyVoice 2: PyTorch Version Constraint (M6)
+
+**⚠️ IMPORTANT**: CosyVoice 2 requires **PyTorch 2.3.1 + CUDA 12.1**, incompatible with the main project (PyTorch 2.7.0 + CUDA 12.8).
+
+**Problem**: Binary incompatibility prevents running CosyVoice in the same environment as other workers (Orchestrator, Whisper, future XTTS/Sesame).
+
+**Solution**: Docker container isolation with separate PyTorch environment.
+
+**Deployment Strategy**:
+
+1. **Production**: Isolated Docker container (`Dockerfile.tts-cosyvoice`)
+   - Base Image: `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04`
+   - Python 3.10 (CosyVoice tested version)
+   - PyTorch 2.3.1 + CUDA 12.1 wheels
+   - CosyVoice repository cloned and installed
+   - Minimal project dependencies (gRPC, Redis, audio processing only)
+
+2. **Development**: Mock mode with conditional import
+   - Adapter implements fallback behavior when CosyVoice not installed
+   - Enables fast iteration without Docker overhead
+   - Unit tests run in mock mode (main CI pipeline)
+
+3. **Testing Strategy**:
+   ```bash
+   # Mock unit tests (fast, main CI)
+   pytest tests/unit/test_cosyvoice_adapter.py
+
+   # Docker integration tests (complete, separate CI job)
+   docker compose run --rm tts-cosyvoice pytest tests/integration/test_cosyvoice.py -v
+
+   # Performance benchmarks (Docker, GPU required)
+   docker compose run --rm tts-cosyvoice pytest tests/performance/test_cosyvoice_fal.py -v
+   ```
+
+**Configuration** (`.env.cosyvoice`):
+```bash
+# PyTorch & CUDA
+PYTORCH_VERSION=2.3.1
+CUDA_VERSION=12.1
+PYTHON_VERSION=3.10
+
+# Model paths (volume-mounted from host)
+COSYVOICE_MODEL_PATH=/models/cosyvoice2/en-base
+COSYVOICE_VOICEPACK_DIR=/models/cosyvoice2
+
+# Worker settings
+WORKER_PORT=7002
+REDIS_URL=redis://redis:6379
+CUDA_VISIBLE_DEVICES=0
+
+# Model Manager
+DEFAULT_MODEL_ID=cosyvoice2-en-base
+TTL_MS=600000
+RESIDENT_CAP=2
+```
+
+**Docker Compose Integration**:
+```yaml
+services:
+  tts-cosyvoice:
+    build:
+      context: .
+      dockerfile: Dockerfile.tts-cosyvoice
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./voicepacks/cosyvoice2:/models/cosyvoice2:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    depends_on: [redis]
+```
+
+**Documentation**:
+- **Primary**: [docs/COSYVOICE_PYTORCH_CONFLICT.md](../docs/COSYVOICE_PYTORCH_CONFLICT.md) - Detailed analysis and solution strategies
+- **Environment**: `.env.cosyvoice` - Configuration template
+- **Setup**: [docs/MULTI_GPU.md](../docs/MULTI_GPU.md) - Multi-container deployment guide
+
+**Impact on M6 Timeline**:
+- Original estimate: 5-7 days
+- Revised estimate: 8-12 days (+60-70% overhead)
+- Additional work: Docker setup (2-3 days), deployment complexity (1-2 days), testing infrastructure (1-2 days)
+
+---
+
 * **Spark-TTS / Parler-TTS / MeloTTS / Piper**
 
   * Similar adapter surface; Piper is CPU/edge fast path; mark capabilities accordingly.
 
-**Voice pack layout (unchanged)**
+
+**Voice pack layout**
 
 ```
 voicepacks/
   <family>/<model_id>/
-    model.safetensors | onnx/
-    config.json
-    tokenizer.json (if needed)
-    metadata.yaml    # tags: lang, expressive, cpu_ok, lora, domain, etc.
-    ref/seed.wav     # optional reference
+    model.safetensors | onnx/ | model.pt  # Model files (format varies by family)
+    config.json                            # Model configuration
+    tokenizer.json (if needed)             # Tokenizer for text processing
+    metadata.yaml                          # tags: lang, expressive, cpu_ok, lora, domain, etc.
+    ref/seed.wav                           # optional reference audio
 ```
+
+**Voicepack Documentation**:
+- **CosyVoice 2**: [docs/VOICEPACK_COSYVOICE2.md](../docs/VOICEPACK_COSYVOICE2.md) - Complete voicepack structure specification
+- **Setup Script**: `scripts/setup_cosyvoice_voicepack.sh` - Automated model download and organization
 
 ---
 
@@ -568,7 +663,7 @@ model_manager:
 * **Audio retention**: off by default; opt-in with retention policy.
 * **TLS**: terminate HTTPS/WSS at nginx/traefik if WAN exposed.
 * **Auth**: demo scope = API key; mTLS between orchestrator and worker optional.
-* **Isolation**: each worker process pinned to device; crashes don’t take sessions down.
+* **Isolation**: each worker process pinned to device; crashes don't take sessions down.
 
 ---
 

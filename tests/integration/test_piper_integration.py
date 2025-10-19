@@ -21,8 +21,9 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from src.tts.adapters.adapter_piper import AdapterState, PiperTTSAdapter
+from src.tts.adapters.adapter_piper import PiperTTSAdapter
 from src.tts.model_manager import ModelManager
+from src.tts.tts_base import AdapterState
 
 
 @pytest.fixture

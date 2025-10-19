@@ -21,7 +21,6 @@ wheels/
 *.egg
 
 # Virtual environments
-.env
 .venv
 env/
 venv/
@@ -83,7 +82,15 @@ voicepacks/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment - Updated for unified dev workflow
+# Pattern explanation:
+#   .env.local          -> gitignored (user overrides, may contain secrets)
+#   .env.*.local        -> gitignored (any .env.foo.local files)
+#   .env.defaults       -> TRACKED (base configuration)
+#   .env.local.example  -> TRACKED (template for users)
+#   .env.models/*.env.* -> TRACKED (model-specific defaults)
+#
+# NOTE: Removed bare `.env` pattern to allow .env.defaults and .env.models to be tracked
 .env.local
 .env.*.local
 

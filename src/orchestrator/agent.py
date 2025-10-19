@@ -73,8 +73,8 @@ class VoiceAssistantAgent(Agent):
             llm=openai.LLM(model="gpt-4o-mini"),
             # Phase 3: Custom gRPC TTS plugin (connects to our TTS worker with Piper)
             tts=grpc_tts.TTS(
-                worker_address="localhost:7001",  # TTS worker gRPC address
-                model_id="piper-en-us-lessac-medium",  # Piper CPU baseline model
+                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+                model_id=os.getenv("DEFAULT_MODEL", "piper-en-us-lessac-medium"),
             ),
             # VAD: Required for streaming with OpenAI STT (which doesn't support streaming natively)
             # Configure with higher threshold to reduce false positives from background noise

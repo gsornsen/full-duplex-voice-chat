@@ -314,7 +314,7 @@ jobs:
           fi
 
           echo "Test paths: $TEST_PATHS"
-          uv run pytest $TEST_PATHS -v -m "not grpc" --tb=short
+          uv run pytest $TEST_PATHS -v -m "not grpc and not infrastructure" --tb=short
         env:
           GRPC_TESTS_ENABLED: "0"
 

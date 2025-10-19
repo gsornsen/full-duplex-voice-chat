@@ -1,0 +1,122 @@
+# Example metadata.yaml for CosyVoice 2 Voicepack
+#
+# This file demonstrates the complete metadata format for CosyVoice 2 models.
+# Copy this template to your voicepack directory and customize the values.
+#
+# Location: voicepacks/cosyvoice/{model_id}/metadata.yaml
+
+# ============================================================================
+# Core Metadata (REQUIRED)
+# ============================================================================
+
+model_id: "cosyvoice2-en-base"    # Unique identifier (must match directory name)
+family: "cosyvoice2"               # Model family for adapter routing (REQUIRED)
+version: "2.0.5"                   # Model version (semver recommended)
+language: "en"                     # ISO 639-1 language code
+sample_rate: 24000                 # Native sample rate (Hz) - FIXED for CosyVoice 2
+
+# ============================================================================
+# Capabilities (REQUIRED)
+# ============================================================================
+
+capabilities:
+  - zero_shot                      # Supports zero-shot voice cloning
+  - multi_speaker                  # Supports multiple speakers
+  - streaming                      # Supports streaming synthesis
+  # - emotion_control              # Supports explicit emotion controls (optional)
+  # - prosody_control              # Supports prosody control (optional)
+
+# ============================================================================
+# Hardware Requirements (REQUIRED)
+# ============================================================================
+
+gpu_required: true                 # Requires GPU (CUDA) - ALWAYS true for CosyVoice
+vram_mb: 1500                      # Estimated VRAM usage (MB)
+cuda_compute_capability: 8.9       # Minimum CUDA compute capability (optional)
+                                   # 8.9 = RTX 4090, 8.6 = RTX 3090, 8.0 = A100
+
+# ============================================================================
+# Speakers (REQUIRED)
+# ============================================================================
+
+speakers:
+  - default                        # Default speaker ID (always include)
+  # - speaker1                     # Additional pre-configured speakers (optional)
+  # - speaker2
+
+# ============================================================================
+# Model Provenance (REQUIRED)
+# ============================================================================
+
+license: "Apache-2.0"              # SPDX license identifier
+source_url: "https://github.com/FunAudioLLM/CosyVoice"
+model_url: "https://modelscope.cn/models/iic/CosyVoice2-0.5B"
+citation: "CosyVoice 2: Scalable Streaming Speech Synthesis with Large Language Models"
+
+# ============================================================================
+# Description (REQUIRED)
+# ============================================================================
+
+description: "CosyVoice 2.0 English base model for zero-shot TTS"
+
+# ============================================================================
+# Tags (OPTIONAL but recommended)
+# ============================================================================
+
+tags:
+  - gpu_required
+  - streaming
+  - neural
+  - zero_shot
+  - transformer
+  # - high_quality
+  # - production_ready
+  # - experimental
+
+# ============================================================================
+# Additional Metadata (OPTIONAL)
+# ============================================================================
+
+# Training information (optional)
+training:
+  dataset: "LibriTTS, VCTK, custom"  # Training datasets
+  hours: 10000                       # Total training hours
+  date: "2024-12"                    # Training completion date
+
+# Performance targets (optional)
+performance:
+  fal_ms: 250                        # First Audio Latency (ms) - p50
+  fal_p95_ms: 300                    # First Audio Latency (ms) - p95
+  rtf: 0.05                          # Real-Time Factor (< 1.0 = faster than real-time)
+  mos: 4.2                           # Mean Opinion Score (1-5)
+
+# Quality metrics (optional)
+quality:
+  naturalness: "high"                # Subjective rating: low, medium, high
+  intelligibility: "high"
+  speaker_similarity: "high"         # For zero-shot cloning
+
+# Deployment notes (optional)
+deployment:
+  docker_required: true              # Requires Docker container isolation
+  pytorch_version: "2.3.1"           # Required PyTorch version
+  cuda_version: "12.1"               # Required CUDA version
+  notes: "Requires isolated Docker container due to PyTorch version conflict"
+
+# ============================================================================
+# Validation Rules
+# ============================================================================
+#
+# Model Manager validates:
+# 1. model_id matches directory name
+# 2. family is "cosyvoice2"
+# 3. sample_rate is 24000
+# 4. gpu_required is true
+# 5. Required files exist: model.pt, config.json
+#
+# Warnings (non-fatal):
+# - Missing speakers.json for multi-speaker models
+# - Missing reference_audio/ for zero-shot models
+# - Large VRAM usage (vram_mb > 2000)
+#
+# ============================================================================

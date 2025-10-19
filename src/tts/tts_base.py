@@ -1,7 +1,34 @@
 """Base protocol/interface for TTS adapters."""
 
 from collections.abc import AsyncIterator
+from enum import Enum
 from typing import Protocol
+
+
+class AdapterState(Enum):
+    """State machine for TTS adapters.
+
+    All TTS adapters follow this state machine for consistent behavior:
+
+    State Transitions:
+        IDLE → SYNTHESIZING: Start synthesis
+        SYNTHESIZING → PAUSED: PAUSE command received
+        PAUSED → SYNTHESIZING: RESUME command received
+        SYNTHESIZING → STOPPED: STOP command received
+        PAUSED → STOPPED: STOP command received
+        STOPPED → IDLE: Reset/cleanup complete
+
+    States:
+        IDLE: Adapter ready, no active synthesis
+        SYNTHESIZING: Actively generating and emitting audio frames
+        PAUSED: Synthesis paused, waiting for RESUME
+        STOPPED: Synthesis terminated, cleanup in progress
+    """
+
+    IDLE = "idle"
+    SYNTHESIZING = "synthesizing"
+    PAUSED = "paused"
+    STOPPED = "stopped"
 
 
 class TTSAdapter(Protocol):

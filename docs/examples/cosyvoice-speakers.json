@@ -1,0 +1,70 @@
+{
+  "// COMMENT": "Example speakers.json for CosyVoice 2 Voicepack",
+  "// LOCATION": "voicepacks/cosyvoice/{model_id}/speakers.json",
+  "// STATUS": "OPTIONAL - Only required for pre-configured multi-speaker models",
+
+  "speakers": [
+    {
+      "id": "default",
+      "name": "Default Voice",
+      "language": "en",
+      "gender": "neutral",
+      "age": "adult",
+      "description": "Neutral English voice with balanced prosody",
+      "embedding": null,
+      "reference_audio": null
+    },
+    {
+      "id": "speaker1",
+      "name": "Sarah (Professional)",
+      "language": "en",
+      "gender": "female",
+      "age": "adult",
+      "description": "Professional female voice with clear articulation",
+      "embedding": [
+        0.123, -0.456, 0.789, -0.012, 0.345,
+        "... (256-dim vector, truncated for example) ..."
+      ],
+      "reference_audio": "reference_audio/speaker1_ref.wav"
+    },
+    {
+      "id": "speaker2",
+      "name": "John (Conversational)",
+      "language": "en",
+      "gender": "male",
+      "age": "adult",
+      "description": "Conversational male voice with warm tone",
+      "embedding": [
+        -0.234, 0.567, -0.890, 0.123, -0.456,
+        "... (256-dim vector, truncated for example) ..."
+      ],
+      "reference_audio": "reference_audio/speaker2_ref.wav"
+    }
+  ],
+
+  "embedding_dim": 256,
+  "default_speaker": "default",
+
+  "metadata": {
+    "version": "1.0",
+    "created": "2025-10-17",
+    "notes": [
+      "Embeddings are model-specific and not transferable between models",
+      "For zero-shot cloning, reference_audio is required",
+      "Pre-computed embeddings reduce inference latency by ~50ms"
+    ]
+  },
+
+  "// NOTES": [
+    "This file is OPTIONAL for CosyVoice 2.",
+    "Zero-shot models can use runtime reference audio instead.",
+    "Pre-computed embeddings are useful for:",
+    "  1. Reducing first audio latency (FAL)",
+    "  2. Ensuring consistent voice across sessions",
+    "  3. Supporting API-based speaker selection",
+    "Embedding extraction example:",
+    "  from cosyvoice.cli.cosyvoice import CosyVoice2",
+    "  model = CosyVoice2('model_path')",
+    "  embedding = model.extract_speaker_embedding('reference.wav')"
+  ]
+}

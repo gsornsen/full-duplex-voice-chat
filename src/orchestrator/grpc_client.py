@@ -41,6 +41,7 @@ Example usage:
         >>> print(f"Resident models: {caps.resident_models}")
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import cast
@@ -64,6 +65,7 @@ class TTSWorkerClient:
         channel: gRPC async channel
         stub: TTSService stub
         session_id: Active session ID (if any)
+        is_connected: Connection status flag
     """
 
     def __init__(self, address: str) -> None:
@@ -76,32 +78,179 @@ class TTSWorkerClient:
         self.channel: grpc.aio.Channel | None = None
         self.stub: tts_pb2_grpc.TTSServiceStub | None = None
         self.session_id: str | None = None
+        self.is_connected: bool = False
         logger.info("TTSWorkerClient initialized", extra={"address": address})
 
-    async def connect(self) -> None:
-        """Establish connection to worker.
+    async def connect(
+        self,
+        max_retries: int = 3,
+        initial_backoff_s: float = 1.0,
+        max_backoff_s: float = 10.0,
+        timeout_s: float = 5.0,
+    ) -> None:
+        """Establish connection to worker with retry logic.
 
         Creates gRPC channel and stub for communication. Tests the connection
-        by calling GetCapabilities to ensure the worker is reachable.
+        by calling GetCapabilities to ensure the worker is reachable. Uses
+        exponential backoff for retries.
+
+        Args:
+            max_retries: Maximum number of connection attempts
+            initial_backoff_s: Initial backoff delay in seconds
+            max_backoff_s: Maximum backoff delay in seconds
+            timeout_s: Timeout for each connection attempt
 
         Raises:
-            grpc.RpcError: If connection fails
+            grpc.RpcError: If connection fails after all retries
         """
-        logger.info("Connecting to worker", extra={"address": self.address})
+        logger.info(
+            "Connecting to worker with retry logic",
+            extra={
+                "address": self.address,
+                "max_retries": max_retries,
+                "initial_backoff_s": initial_backoff_s,
+            },
+        )
+
         self.channel = grpc.aio.insecure_channel(self.address)
         # Generated gRPC stubs are untyped
         self.stub = tts_pb2_grpc.TTSServiceStub(self.channel)  # type: ignore[no-untyped-call]
 
-        # Test connection with GetCapabilities
+        # Test connection with retries
+        backoff = initial_backoff_s
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                # Test connection with timeout
+                await asyncio.wait_for(self.get_capabilities(), timeout=timeout_s)
+                self.is_connected = True
+                logger.info(
+                    "Connected to worker successfully",
+                    extra={"address": self.address, "attempt": attempt + 1},
+                )
+                return
+            except (TimeoutError, grpc.RpcError) as e:
+                last_error = e
+                self.is_connected = False
+
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "Connection attempt failed, retrying...",
+                        extra={
+                            "address": self.address,
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries,
+                            "backoff_s": backoff,
+                            "error": str(e),
+                        },
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, max_backoff_s)
+                else:
+                    logger.error(
+                        "Failed to connect to worker after all retries",
+                        extra={
+                            "address": self.address,
+                            "attempts": max_retries,
+                            "error": str(e),
+                        },
+                    )
+
+        # All retries failed
+        if last_error:
+            raise last_error
+
+    async def check_connection(self) -> bool:
+        """Check if connection to worker is healthy.
+
+        Attempts to call GetCapabilities to verify the worker is reachable.
+        Updates the is_connected flag based on the result.
+
+        Returns:
+            True if connection is healthy, False otherwise
+        """
         try:
-            await self.get_capabilities()
-            logger.info("Connected to worker successfully", extra={"address": self.address})
-        except grpc.RpcError as e:
-            logger.error(
-                "Failed to connect to worker",
-                extra={"address": self.address, "error": str(e)},
-            )
-            raise
+            await asyncio.wait_for(self.get_capabilities(), timeout=3.0)
+            if not self.is_connected:
+                logger.info("Worker connection restored", extra={"address": self.address})
+            self.is_connected = True
+            return True
+        except (TimeoutError, grpc.RpcError) as e:
+            if self.is_connected:
+                logger.warning(
+                    "Worker connection lost",
+                    extra={"address": self.address, "error": str(e)},
+                )
+            self.is_connected = False
+            return False
+
+    async def wait_for_connection(
+        self,
+        max_wait_s: float = 60.0,
+        check_interval_s: float = 2.0,
+    ) -> bool:
+        """Wait for worker to become available.
+
+        Polls the worker connection status until it becomes available or timeout.
+        Useful for startup when worker may not be ready immediately.
+
+        Args:
+            max_wait_s: Maximum time to wait in seconds
+            check_interval_s: Interval between connection checks
+
+        Returns:
+            True if worker became available, False if timeout
+        """
+        logger.info(
+            "Waiting for worker to become available",
+            extra={
+                "address": self.address,
+                "max_wait_s": max_wait_s,
+                "check_interval_s": check_interval_s,
+            },
+        )
+
+        start_time = asyncio.get_event_loop().time()
+        attempt = 0
+
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= max_wait_s:
+                logger.warning(
+                    "Timeout waiting for worker",
+                    extra={
+                        "address": self.address,
+                        "elapsed_s": elapsed,
+                        "attempts": attempt,
+                    },
+                )
+                return False
+
+            attempt += 1
+            if await self.check_connection():
+                logger.info(
+                    "Worker is now available",
+                    extra={
+                        "address": self.address,
+                        "elapsed_s": elapsed,
+                        "attempts": attempt,
+                    },
+                )
+                return True
+
+            # Log progress every 10 seconds
+            if attempt % 5 == 0:
+                logger.info(
+                    "Still waiting for worker...",
+                    extra={
+                        "address": self.address,
+                        "elapsed_s": elapsed,
+                        "attempts": attempt,
+                    },
+                )
+
+            await asyncio.sleep(check_interval_s)
 
     async def disconnect(self) -> None:
         """Close connection to worker.
@@ -120,6 +269,7 @@ class TTSWorkerClient:
             await self.channel.close()
             self.channel = None
             self.stub = None
+            self.is_connected = False
 
     async def start_session(
         self, session_id: str, model_id: str = "mock-440hz", options: dict[str, str] | None = None
@@ -142,6 +292,15 @@ class TTSWorkerClient:
         """
         if not self.stub:
             raise RuntimeError("Not connected to worker")
+
+        if not self.is_connected:
+            logger.warning(
+                "Attempting to start session while disconnected",
+                extra={"session_id": session_id, "address": self.address},
+            )
+            # Attempt to reconnect
+            if not await self.check_connection():
+                raise RuntimeError(f"Worker not available at {self.address}")
 
         logger.info(
             "Starting session",

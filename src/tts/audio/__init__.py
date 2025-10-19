@@ -2,6 +2,7 @@
 
 from .framing import repacketize_to_20ms
 from .loudness import normalize_lufs, normalize_rms
+from .resampling import resample_audio
 from .synthesis import (
     calculate_frame_count,
     calculate_pcm_byte_size,
@@ -14,6 +15,8 @@ from .synthesis import (
 __all__ = [
     # Framing utilities
     "repacketize_to_20ms",
+    # Resampling utilities
+    "resample_audio",
     # Loudness normalization
     "normalize_rms",
     "normalize_lufs",

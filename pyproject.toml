@@ -36,6 +36,7 @@ dependencies = [
     "onnxruntime>=1.16.0",
     "livekit-plugins-openai>=0.8.0",
     "livekit-plugins-silero>=0.7.0",
+    "modelscope>=1.31.0",
 ]
 
 [project.optional-dependencies]
@@ -106,6 +107,9 @@ markers = [
     "livekit: Tests requiring LiveKit container",
     "performance: Performance benchmark tests",
     "slow: Tests that take longer to run (> 5s)",
+    "gpu: Tests requiring GPU hardware (may skip if unavailable)",
+    "infrastructure: Infrastructure smoke tests (Docker Compose, justfile commands)",
+    "ci_skip: Tests excluded from CI (flaky on shared runners)",
 ]
 
 [tool.coverage.run]
