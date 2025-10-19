@@ -108,6 +108,8 @@ markers = [
     "performance: Performance benchmark tests",
     "slow: Tests that take longer to run (> 5s)",
     "gpu: Tests requiring GPU hardware (may skip if unavailable)",
+    "infrastructure: Infrastructure smoke tests (Docker Compose, justfile commands)",
+    "ci_skip: Tests excluded from CI (flaky on shared runners)",
 ]
 
 [tool.coverage.run]

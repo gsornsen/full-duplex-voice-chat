@@ -413,7 +413,7 @@ typecheck:
 
 # Run pytest tests (excludes performance benchmarks, Docker, and gRPC tests that require --forked)
 test:
-    uv run pytest tests/ -v -m "not performance and not docker and not grpc"
+    uv run pytest tests/ -v -m "not performance and not docker and not grpc and not infrastructure"
 
 # Run integration tests with process isolation (requires Docker services)
 test-integration:
@@ -427,7 +427,7 @@ test-integration:
     sleep 10
     echo ""
     echo "Running integration tests with --forked flag for process isolation..."
-    GRPC_TESTS_FORKED=1 uv run pytest tests/integration/ --forked -v -m "integration"
+    GRPC_TESTS_FORKED=1 uv run pytest tests/integration/ --forked -v -m "integration and not infrastructure"
 
 # Run integration tests without process isolation (faster but may segfault)
 test-integration-fast:
@@ -450,6 +450,27 @@ test-performance:
     GRPC_TESTS_FORKED=1 uv run pytest tests/performance/test_performance.py --forked -v -m performance
 
 # Run all checks (lint + typecheck + test) - excludes Docker-dependent tests
+
+
+# Run infrastructure smoke tests (Docker Compose, justfile commands)
+# WARNING: These tests are excluded from CI due to flakiness on shared runners
+# Only run these tests locally to validate development workflow tooling
+test-infrastructure:
+    #!/usr/bin/env bash
+    set -e
+    echo "╔════════════════════════════════════════════════════════════════════╗"
+    echo "║  Running Infrastructure Smoke Tests                                ║"
+    echo "╚════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "⚠️  WARNING: These tests validate Docker Compose and 'just' commands"
+    echo "   They are EXCLUDED from CI due to inherent flakiness on shared runners"
+    echo "   Only run these locally to validate development workflow changes"
+    echo ""
+    echo "Running infrastructure tests..."
+    uv run pytest tests/integration/test_unified_workflow.py -v -m "infrastructure"
+    echo ""
+    echo "✅ Infrastructure tests complete!"
+
 ci: lint typecheck test
 
 # =============================================================================

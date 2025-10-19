@@ -102,6 +102,8 @@ def redis_client() -> aioredis.Redis[bytes]:
 
 
 @pytest.mark.integration
+@pytest.mark.infrastructure
+@pytest.mark.ci_skip
 @pytest.mark.docker
 @pytest.mark.redis
 class TestInfrastructure:
