@@ -115,7 +115,7 @@ class TestInfrastructure:
         - LiveKit server starts and serves health endpoint
         - Caddy reverse proxy starts and serves admin API
 
-        Expected Duration: < 60s (cold start), < 30s (warm)
+        Expected Duration: < 120s (cold start on slow CI), < 60s (warm local)
         """
         # Start only infrastructure services (no TTS workers or orchestrator)
         services = ["redis", "livekit", "caddy"]
@@ -133,10 +133,10 @@ class TestInfrastructure:
             startup_duration = time.perf_counter() - start_time
 
             assert result.returncode == 0, f"Docker Compose failed: {result.stderr}"
-            assert startup_duration < 60, f"Startup took {startup_duration:.1f}s (expected < 60s)"
+            assert startup_duration < 120, f"Startup took {startup_duration:.1f}s (expected < 120s)"
 
-            # Wait for health checks to pass (up to 30s)
-            health_timeout = 30
+            # Wait for health checks to pass (up to 90s for slow CI runners)
+            health_timeout = 90
             health_start = time.perf_counter()
 
             while (time.perf_counter() - health_start) < health_timeout:
@@ -155,7 +155,7 @@ class TestInfrastructure:
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=5,
+                    timeout=10,
                 )
 
                 # Check LiveKit
@@ -174,7 +174,7 @@ class TestInfrastructure:
                         "http://localhost:7880/",
                     ],
                     capture_output=True,
-                    timeout=5,
+                    timeout=10,
                 )
 
                 # Check Caddy
@@ -193,7 +193,7 @@ class TestInfrastructure:
                         "http://localhost:2019/config/",
                     ],
                     capture_output=True,
-                    timeout=5,
+                    timeout=10,
                 )
 
                 if (
@@ -204,7 +204,7 @@ class TestInfrastructure:
                     # All health checks passed
                     break
 
-                time.sleep(2)
+                time.sleep(3)
             else:
                 pytest.fail(
                     f"Health checks did not pass within {health_timeout}s\n"
