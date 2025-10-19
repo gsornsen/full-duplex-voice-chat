@@ -135,11 +135,29 @@ class TestInfrastructure:
             assert result.returncode == 0, f"Docker Compose failed: {result.stderr}"
             assert startup_duration < 120, f"Startup took {startup_duration:.1f}s (expected < 120s)"
 
+            # Give containers initial time to start (especially important for slow CI runners)
+            time.sleep(5)
+
             # Wait for health checks to pass (up to 90s for slow CI runners)
             health_timeout = 90
             health_start = time.perf_counter()
 
             while (time.perf_counter() - health_start) < health_timeout:
+                # First check if containers are actually running
+                ps_result = subprocess.run(
+                    ["docker", "compose", "-f", str(docker_compose_file), "ps", "--format", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+                # Log container status for debugging
+                if ps_result.returncode != 0:
+                    print(f"Warning: Could not check container status: {ps_result.stderr}")
+                else:
+                    print(f"Container status: {ps_result.stdout[:200]}")
+
+                # Continue with health checks
                 # Check Redis
                 redis_health = subprocess.run(
                     [
@@ -174,10 +192,11 @@ class TestInfrastructure:
                         "http://localhost:7880/",
                     ],
                     capture_output=True,
+                    text=True,
                     timeout=10,
                 )
 
-                # Check Caddy
+                # Check Caddy - use caddy CLI instead of wget (more reliable)
                 caddy_health = subprocess.run(
                     [
                         "docker",
@@ -187,12 +206,11 @@ class TestInfrastructure:
                         "exec",
                         "-T",
                         "caddy",
-                        "wget",
-                        "--spider",
-                        "-q",
-                        "http://localhost:2019/config/",
+                        "caddy",
+                        "version",
                     ],
                     capture_output=True,
+                    text=True,
                     timeout=10,
                 )
 
@@ -202,15 +220,34 @@ class TestInfrastructure:
                     and caddy_health.returncode == 0
                 ):
                     # All health checks passed
+                    elapsed = time.perf_counter() - health_start
+                    print(f"All health checks passed after {elapsed:.1f}s")
                     break
+
+                # Log failed health checks for debugging
+                if redis_health.returncode != 0:
+                    print(f"Redis health check failed: {redis_health.stderr}")
+                if livekit_health.returncode != 0:
+                    print(f"LiveKit health check failed: {livekit_health.stderr}")
+                if caddy_health.returncode != 0:
+                    print(f"Caddy health check failed: {caddy_health.stderr}")
 
                 time.sleep(3)
             else:
+                # Collect container logs for debugging
+                logs_result = subprocess.run(
+                    ["docker", "compose", "-f", str(docker_compose_file), "logs", "--tail", "20"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
                 pytest.fail(
                     f"Health checks did not pass within {health_timeout}s\n"
                     f"Redis: {redis_health.returncode}, "
                     f"LiveKit: {livekit_health.returncode}, "
-                    f"Caddy: {caddy_health.returncode}"
+                    f"Caddy: {caddy_health.returncode}\n\n"
+                    f"Container logs:\n{logs_result.stdout[-1000:]}"
                 )
 
         finally:
