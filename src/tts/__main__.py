@@ -52,13 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adapter",
         type=str,
-        default="mock",
+        default=os.getenv("ADAPTER_TYPE", "mock"),
         choices=["mock", "sesame", "cosyvoice2", "xtts", "piper"],
         help="TTS adapter to use (default: mock)",
     )
     parser.add_argument(
         "--default-model",
         type=str,
+        default=os.getenv("DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", None)),
         help="Override default model ID from config (precedence: CLI > ENV > config)",
     )
     parser.add_argument(
@@ -90,7 +91,7 @@ async def main() -> None:
 
     Configuration precedence for default_model_id:
         1. CLI flag (--default-model)
-        2. Environment variable (DEFAULT_MODEL)
+        2. Environment variable (DEFAULT_MODEL_ID or DEFAULT_MODEL)
         3. YAML config (model_manager.default_model_id)
     """
     args = parse_args()
@@ -112,7 +113,7 @@ async def main() -> None:
     if args.default_model:
         config.model_manager.default_model_id = args.default_model
         model_source = "cli"
-    elif env_model := os.getenv("DEFAULT_MODEL"):
+    elif env_model := os.getenv("DEFAULT_MODEL_ID") or os.getenv("DEFAULT_MODEL"):
         config.model_manager.default_model_id = env_model
         model_source = "env"
 

@@ -67,6 +67,27 @@ dev model=DEFAULT_MODEL mode=DEFAULT_MODE:
     # Export orchestrator mode for docker-compose
     export ORCHESTRATOR_MODE="{{mode}}"
 
+    # Validate and set model-specific environment variables
+    if [ "{{model}}" = "cosyvoice" ] || [ "{{model}}" = "cosyvoice2" ]; then
+        # CosyVoice configuration
+        if [ -z "${DEFAULT_MODEL:-}" ] || [[ ! "${DEFAULT_MODEL}" =~ ^cosyvoice2- ]]; then
+            echo "⚠️  WARNING: CosyVoice profile selected but DEFAULT_MODEL not set correctly"
+            echo "   Setting DEFAULT_MODEL=cosyvoice2-en-base"
+            export DEFAULT_MODEL=cosyvoice2-en-base
+            export DEFAULT_MODEL_ID=cosyvoice2-en-base
+            export ADAPTER_TYPE=cosyvoice2
+        fi
+    elif [ "{{model}}" = "piper" ]; then
+        # Piper configuration
+        if [ -z "${DEFAULT_MODEL:-}" ] || [[ "${DEFAULT_MODEL}" =~ ^cosyvoice2- ]]; then
+            echo "⚠️  WARNING: Piper profile selected but DEFAULT_MODEL points to CosyVoice"
+            echo "   Setting DEFAULT_MODEL=piper-en-us-lessac-medium"
+            export DEFAULT_MODEL=piper-en-us-lessac-medium
+            export DEFAULT_MODEL_ID=piper-en-us-lessac-medium
+            export ADAPTER_TYPE=piper
+        fi
+    fi
+
     # Determine build flags (smart detection)
     BUILD_FLAG=""
     if [ "{{FORCE_BUILD}}" = "true" ]; then
@@ -100,10 +121,14 @@ dev model=DEFAULT_MODEL mode=DEFAULT_MODE:
         fi
     fi
 
+    # Stop any running TTS workers from other profiles (ensures clean state)
+    echo "Ensuring clean TTS worker state..."
+    {{COMPOSE}} stop tts0 tts-cosyvoice 2>/dev/null || true
+
     # Determine which profile to use for TTS worker
     if [ "{{model}}" = "piper" ]; then
         echo "Starting with default Piper worker (CPU)..."
-        {{COMPOSE}} up -d $BUILD_FLAG
+        {{COMPOSE}} --profile piper up -d $BUILD_FLAG
     elif [ "{{model}}" = "cosyvoice" ] || [ "{{model}}" = "cosyvoice2" ]; then
         echo "Starting with CosyVoice worker (GPU, PyTorch 2.3.1)..."
         {{COMPOSE}} --profile cosyvoice up -d $BUILD_FLAG
@@ -148,6 +173,27 @@ dev-fg model=DEFAULT_MODEL mode=DEFAULT_MODE:
     # Export orchestrator mode for docker-compose
     export ORCHESTRATOR_MODE="{{mode}}"
 
+    # Validate and set model-specific environment variables
+    if [ "{{model}}" = "cosyvoice" ] || [ "{{model}}" = "cosyvoice2" ]; then
+        # CosyVoice configuration
+        if [ -z "${DEFAULT_MODEL:-}" ] || [[ ! "${DEFAULT_MODEL}" =~ ^cosyvoice2- ]]; then
+            echo "⚠️  WARNING: CosyVoice profile selected but DEFAULT_MODEL not set correctly"
+            echo "   Setting DEFAULT_MODEL=cosyvoice2-en-base"
+            export DEFAULT_MODEL=cosyvoice2-en-base
+            export DEFAULT_MODEL_ID=cosyvoice2-en-base
+            export ADAPTER_TYPE=cosyvoice2
+        fi
+    elif [ "{{model}}" = "piper" ]; then
+        # Piper configuration
+        if [ -z "${DEFAULT_MODEL:-}" ] || [[ "${DEFAULT_MODEL}" =~ ^cosyvoice2- ]]; then
+            echo "⚠️  WARNING: Piper profile selected but DEFAULT_MODEL points to CosyVoice"
+            echo "   Setting DEFAULT_MODEL=piper-en-us-lessac-medium"
+            export DEFAULT_MODEL=piper-en-us-lessac-medium
+            export DEFAULT_MODEL_ID=piper-en-us-lessac-medium
+            export ADAPTER_TYPE=piper
+        fi
+    fi
+
     # Determine build flags (smart detection)
     BUILD_FLAG=""
     if [ "{{FORCE_BUILD}}" = "true" ]; then
@@ -180,6 +226,10 @@ dev-fg model=DEFAULT_MODEL mode=DEFAULT_MODE:
             BUILD_FLAG=""
         fi
     fi
+
+    # Stop any running TTS workers from other profiles (ensures clean state)
+    echo "Ensuring clean TTS worker state..."
+    {{COMPOSE}} stop tts0 tts-cosyvoice 2>/dev/null || true
 
     # Determine which profile to use
     if [ "{{model}}" = "piper" ]; then
@@ -215,6 +265,19 @@ dev-switch model:
     echo "Stopping current workers..."
     {{COMPOSE}} stop tts0 || true
     {{COMPOSE}} stop tts-cosyvoice || true
+
+    # Validate and set model-specific environment variables
+    if [ "{{model}}" = "cosyvoice" ] || [ "{{model}}" = "cosyvoice2" ]; then
+        # CosyVoice configuration
+        export DEFAULT_MODEL=cosyvoice2-en-base
+        export DEFAULT_MODEL_ID=cosyvoice2-en-base
+        export ADAPTER_TYPE=cosyvoice2
+    elif [ "{{model}}" = "piper" ]; then
+        # Piper configuration
+        export DEFAULT_MODEL=piper-en-us-lessac-medium
+        export DEFAULT_MODEL_ID=piper-en-us-lessac-medium
+        export ADAPTER_TYPE=piper
+    fi
 
     # Determine build flags (smart detection)
     BUILD_FLAG=""
@@ -282,7 +345,8 @@ dev-logs service="":
     #!/usr/bin/env bash
     if [ -z "{{service}}" ]; then
         echo "Following logs for all services (Ctrl+C to stop)..."
-        {{COMPOSE}} logs -f
+        # Include all active profiles (cosyvoice, piper)
+        {{COMPOSE}} --profile cosyvoice --profile piper logs -f
     else
         echo "Following logs for service: {{service}}"
         {{COMPOSE}} logs -f {{service}}

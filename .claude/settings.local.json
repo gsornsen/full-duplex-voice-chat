@@ -54,7 +54,9 @@
       "Bash(curl:*)",
       "Bash(ls:*)",
       "Read(//home/gerald/git/mycelium/**)",
-      "mcp__RedisMCPServer__hset"
+      "mcp__RedisMCPServer__hset",
+      "Read(//home/gerald/.cache/**)",
+      "Read(//home/gerald/**)"
     ],
     "deny": [],
     "ask": []

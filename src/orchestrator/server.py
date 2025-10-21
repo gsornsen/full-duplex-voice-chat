@@ -23,6 +23,7 @@ from src.asr.adapters import WhisperAdapter, WhisperXAdapter
 from src.orchestrator.audio.buffer import AudioBuffer
 from src.orchestrator.audio.resampler import AudioResampler
 from src.orchestrator.config import OrchestratorConfig
+from src.orchestrator.config_validator import ConfigValidator
 from src.orchestrator.grpc_client import TTSWorkerClient
 from src.orchestrator.health import setup_health_routes
 from src.orchestrator.registry import WorkerRegistry
@@ -71,6 +72,13 @@ class OrchestratorServer:
         Args:
             config: Server configuration
         """
+        # Run configuration validation
+        logger.info("Validating configuration...")
+        try:
+            ConfigValidator.validate_all(strict=False)  # Log warnings but don't fail
+        except Exception as e:
+            logger.warning(f"Configuration validation error: {e}")
+
         self.config = config
 
         # ASR adapter (shared across sessions)

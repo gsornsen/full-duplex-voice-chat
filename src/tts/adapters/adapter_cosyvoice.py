@@ -15,11 +15,15 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
+
+from src.tts.audio.framing import repacketize_to_20ms
+from src.tts.audio.resampling import resample_audio
+from src.tts.tts_base import AdapterState
 
 # Import CosyVoice 2 with graceful fallback for testing
 try:
@@ -27,10 +31,17 @@ try:
 except ImportError:
     CosyVoice2 = None  # Graceful degradation for testing
 
-from src.tts.audio.framing import repacketize_to_20ms
-from src.tts.audio.resampling import resample_audio
-from src.tts.tts_base import AdapterState
+# Import Hugging Face Hub for model download
+if TYPE_CHECKING:
+    from huggingface_hub import snapshot_download as _snapshot_download
+else:
+    try:
+        from huggingface_hub import snapshot_download as _snapshot_download
+    except ImportError:
+        _snapshot_download = None  # type: ignore[assignment]  # Graceful degradation
 
+# Type alias for snapshot_download (can be None if not installed)
+snapshot_download: Any = _snapshot_download
 # Constants
 TARGET_SAMPLE_RATE_HZ: Final[int] = 48000  # Required output sample rate
 FRAME_DURATION_MS: Final[int] = 20  # 20ms frames
@@ -41,8 +52,78 @@ WARMUP_TEXT: Final[str] = "Testing warmup synthesis for model initialization."
 # CosyVoice 2 specific constants
 COSYVOICE_NATIVE_SAMPLE_RATE: Final[int] = 24000  # CosyVoice 2 native rate
 COSYVOICE_DEFAULT_SPEAKER: Final[str] = "default"  # Default speaker ID
+COSYVOICE_HF_REPO_ID: Final[str] = "FunAudioLLM/CosyVoice2-0.5B"  # Official Hugging Face repo
+# Silence prompt duration: 2 seconds at 16kHz provides sufficient samples for
+# mel spectrogram padding. CosyVoice requires >=1440 samples after resampling
+# for 720-sample padding. Using 2s (32000@16kHz → 48000@24kHz) provides margin.
+SILENCE_PROMPT_DURATION_SAMPLES_16KHZ: Final[int] = 32000  # 2 seconds at 16kHz
 
 logger = logging.getLogger(__name__)
+
+
+def _download_cosyvoice_model_if_needed(model_path: Path) -> None:
+    """Download CosyVoice2 model from Hugging Face if not already present.
+
+    Args:
+        model_path: Path to the voicepack directory
+
+    Raises:
+        ImportError: If huggingface_hub is not available
+        RuntimeError: If download fails
+    """
+    # Check if model already exists (look for key files)
+    required_files = ["cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt"]
+    model_exists = all((model_path / f).exists() for f in required_files)
+
+    if model_exists:
+        logger.info(
+            "CosyVoice2 model already exists, skipping download",
+            extra={"model_path": str(model_path)},
+        )
+        return
+
+    logger.info(
+        "CosyVoice2 model not found, downloading from Hugging Face",
+        extra={"model_path": str(model_path), "repo_id": COSYVOICE_HF_REPO_ID},
+    )
+
+    if snapshot_download is None:
+        raise ImportError(
+            "huggingface_hub is required to download CosyVoice2 model. "
+            "Install with: pip install huggingface-hub"
+        )
+
+    try:
+        # Create parent directory if it doesn't exist
+        model_path.mkdir(parents=True, exist_ok=True)
+
+        # Download model from Hugging Face
+        logger.info(
+            "Downloading CosyVoice2 model from Hugging Face (this may take a few minutes)...",
+            extra={"repo_id": COSYVOICE_HF_REPO_ID, "local_dir": str(model_path)},
+        )
+
+        downloaded_path = snapshot_download(
+            repo_id=COSYVOICE_HF_REPO_ID,
+            local_dir=str(model_path),
+            # Resume is now automatic in huggingface_hub 1.0+
+        )
+
+        logger.info(
+            "CosyVoice2 model downloaded successfully",
+            extra={"downloaded_path": downloaded_path, "model_path": str(model_path)},
+        )
+
+    except Exception as e:
+        logger.error(
+            "Failed to download CosyVoice2 model from Hugging Face",
+            extra={"error": str(e), "repo_id": COSYVOICE_HF_REPO_ID},
+            exc_info=True,
+        )
+        raise RuntimeError(
+            f"Failed to download CosyVoice2 model: {e}. "
+            "Please check your internet connection and try again."
+        ) from e
 
 
 class CosyVoiceAdapter:
@@ -122,6 +203,13 @@ class CosyVoiceAdapter:
                 ),
             },
         )
+
+        # Download model from Hugging Face if not already present
+        logger.info(
+            "Checking if CosyVoice2 model needs to be downloaded",
+            extra={"model_path": str(self.model_path)},
+        )
+        _download_cosyvoice_model_if_needed(self.model_path)
 
         # Load CosyVoice 2 model
         if CosyVoice2 is None:
@@ -313,10 +401,24 @@ class CosyVoiceAdapter:
 
                 # For M6: Use batch mode with default voice (no reference audio)
                 # Empty prompt_text and silence reference audio for default voice
+                # CRITICAL FIX: CosyVoice expects torch.Tensor, not numpy.ndarray
+                # Convert silence reference to torch.Tensor to avoid AttributeError
+                # CosyVoice frontend preprocessing expects CPU tensors (GPU is used later)
+                # GPU acceleration happens later in the model inference pipeline
+                # PADDING FIX: Use 2-second silence (32000 samples) vs 1 second (16000)
+                # After resampling to 24kHz (48000 samples), provides sufficient length
+                # for mel spectrogram padding (requires >= 1440 samples for 720 padding)
+                # SHAPE FIX: Add batch dimension [1, samples] to match CosyVoice convention
+                # CosyVoice expects batch-first tensors: (batch, time) not just (time)
+                # Without batch dim, library incorrectly reshapes to [samples, 1] vs [1, samples]
+                silence_prompt = torch.zeros(
+                    (1, SILENCE_PROMPT_DURATION_SAMPLES_16KHZ), dtype=torch.float32, device="cpu"
+                )  # Shape: [1, 32000] (batch, time)
+
                 for chunk in self.model.inference_zero_shot(
                     tts_text=text,
                     prompt_text="",  # Empty for default voice
-                    prompt_speech_16k=np.zeros(16000, dtype=np.float32),  # Silence ref
+                    prompt_speech_16k=silence_prompt,  # torch.Tensor instead of np.ndarray
                     stream=False,  # Use batch mode for simplicity (M6)
                     speed=1.0,
                 ):

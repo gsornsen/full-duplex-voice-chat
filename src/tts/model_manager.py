@@ -432,8 +432,6 @@ class ModelManager:
         # Route to CosyVoice 2 adapter for cosyvoice2-* models (M6)
         # Lazy import to support PyTorch 2.3.1 isolation in CosyVoice container
         if model_id.startswith("cosyvoice2-"):
-            from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
-
             # Extract voice name from model_id
             # (e.g., "cosyvoice2-en-base" -> "en-base")
             voice_name = model_id.replace("cosyvoice2-", "", 1)
@@ -444,10 +442,62 @@ class ModelManager:
                     f"Voicepack not found for model {model_id}: {voicepack_path}"
                 )
 
-            cosyvoice_adapter: Any = CosyVoiceAdapter(
-                model_id=model_id, model_path=voicepack_path
-            )
-            return cosyvoice_adapter
+            # First attempt: Try to import and load CosyVoice adapter
+            try:
+                from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+
+                cosyvoice_adapter: Any = CosyVoiceAdapter(
+                    model_id=model_id, model_path=voicepack_path
+                )
+                return cosyvoice_adapter
+
+            except ImportError as import_error:
+                # CosyVoice package not installed, attempt to download model
+                logger.warning(
+                    "CosyVoice package not installed, attempting to download model...",
+                    extra={
+                        "model_id": model_id,
+                        "error": str(import_error),
+                    },
+                )
+
+                try:
+                    # Import download function (may also fail if huggingface_hub not installed)
+                    from src.tts.adapters.adapter_cosyvoice import (
+                        _download_cosyvoice_model_if_needed,
+                    )
+
+                    # Attempt to download the model
+                    _download_cosyvoice_model_if_needed(voicepack_path)
+
+                    logger.info(
+                        "CosyVoice model downloaded successfully, retrying load...",
+                        extra={"model_id": model_id, "voicepack_path": str(voicepack_path)},
+                    )
+
+                    # Second attempt: Try to import and load again after download
+                    from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+
+                    cosyvoice_adapter = CosyVoiceAdapter(
+                        model_id=model_id, model_path=voicepack_path
+                    )
+                    return cosyvoice_adapter
+
+                except (ImportError, RuntimeError) as download_error:
+                    # Download or second import failed - raise with helpful message
+                    logger.error(
+                        "Failed to load CosyVoice model even after download attempt",
+                        extra={
+                            "model_id": model_id,
+                            "original_error": str(import_error),
+                            "download_error": str(download_error),
+                        },
+                    )
+                    raise ModelManagerError(
+                        f"Failed to load CosyVoice model {model_id}. "
+                        "CosyVoice dependencies not installed or model download failed. "
+                        "Install CosyVoice dependencies with: docker compose --profile cosyvoice up"
+                    ) from download_error
 
         # Default to mock adapter for testing (imported at module level)
         mock_adapter: Any = MockTTSAdapter(model_id=model_id)

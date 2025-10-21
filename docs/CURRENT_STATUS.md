@@ -196,7 +196,7 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - **Issue**: grpc-python segfaults in WSL2 during test teardown
 - **Solution**: pytest-forked integration with `--forked` flag
 - **Status**: 100% mitigated, tests reliable
-- **Documentation**: [GRPC_SEGFAULT_WORKAROUND.md](../GRPC_SEGFAULT_WORKAROUND.md)
+- **Documentation**: [GRPC_SEGFAULT_WORKAROUND.md](archive/working/GRPC_SEGFAULT_WORKAROUND.md)
 - **Usage**: `just test-integration` (automatic)
 
 **Unified Development Workflow (2025-10-17)** ✅:
@@ -221,6 +221,20 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - Architecture: Clean separation of concerns with shared utilities
 
 ---
+
+**Configuration System (2025-10-19)** ✅:
+- **Environment-based configuration**: All settings externalized to `.env` file
+- **Adapter/Model validation**: Startup checks for compatibility (e.g., `cosyvoice2-*` requires `ADAPTER_TYPE=cosyvoice2`)
+- **GPU auto-detection**: WhisperX automatically uses GPU when `ASR_DEVICE=auto`
+- **Performance improvements**:
+  - GPU WhisperX initialization: 28s → 3-5s (5-9x faster)
+  - GPU WhisperX memory: 1470 MB → 900 MB (40% reduction)
+  - Real-time factor (RTF): 0.095 (CPU) → 0.048 (GPU)
+- **Configuration validation warnings**: Clear messages for common misconfigurations
+- **Backward compatibility**: Legacy environment variable names still supported
+- **Documentation**: Comprehensive configuration guide ([docs/CONFIGURATION.md](CONFIGURATION.md))
+- **Location**: `src/orchestrator/config_validator.py`, `.env.example`
+
 
 ## What's Planned (M6 Phase 4, M7-M9, M11-M13 Roadmap)
 
@@ -310,7 +324,7 @@ This project implements a realtime duplex voice chat system with low-latency TTS
 - gRPC tests require `--forked` mode due to upstream segfault issue
 - Workaround: Use `just test-integration` (automatic)
 - Alternative: Skip gRPC tests in WSL2, run in Docker/native Linux
-- Documentation: [GRPC_SEGFAULT_WORKAROUND.md](../GRPC_SEGFAULT_WORKAROUND.md)
+- Documentation: [GRPC_SEGFAULT_WORKAROUND.md](archive/working/GRPC_SEGFAULT_WORKAROUND.md)
 - Status: Fully mitigated, tests 100% reliable
 
 **Python 3.13**:
@@ -517,7 +531,7 @@ CLI Client
 
 ### Operational Guides
 
-- **[GRPC_SEGFAULT_WORKAROUND.md](../GRPC_SEGFAULT_WORKAROUND.md)**: WSL2 gRPC testing workaround (exemplary)
+- **[GRPC_SEGFAULT_WORKAROUND.md](archive/working/GRPC_SEGFAULT_WORKAROUND.md)**: WSL2 gRPC testing workaround (exemplary)
 - **[TEST_REPAIR_SUMMARY.md](../TEST_REPAIR_SUMMARY.md)**: Integration test fixes and protocol decisions
 - **[INTEGRATION_TEST_FIXES.md](../INTEGRATION_TEST_FIXES.md)**: Detailed integration test repair log
 
@@ -655,7 +669,7 @@ CLI Client
 
 - **Documentation Issues**: See [PHASE1_REPORT_DOCUMENTATION_AUDIT.md](../PHASE1_REPORT_DOCUMENTATION_AUDIT.md)
 - **Test Issues**: See [docs/TESTING_GUIDE.md](TESTING_GUIDE.md)
-- **gRPC/WSL2 Issues**: See [GRPC_SEGFAULT_WORKAROUND.md](../GRPC_SEGFAULT_WORKAROUND.md)
+- **gRPC/WSL2 Issues**: See [GRPC_SEGFAULT_WORKAROUND.md](archive/working/GRPC_SEGFAULT_WORKAROUND.md)
 
 ---
 

@@ -8,6 +8,7 @@ import {
   useRoomContext,
   useVoiceAssistant,
 } from '@livekit/components-react';
+import { RoomEvent } from 'livekit-client';
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
@@ -36,6 +37,8 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [isInitializing, setIsInitializing] = useState(false);
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
 
@@ -46,6 +49,36 @@ export const SessionView = ({
   async function handleSendMessage(message: string) {
     await send(message);
   }
+
+  // Listen for agent status updates via data channel
+  useEffect(() => {
+    const handleDataReceived = (payload: Uint8Array) => {
+      try {
+        const data = JSON.parse(new TextDecoder().decode(payload));
+
+        if (data.type === 'status') {
+          setStatusMessage(data.message);
+
+          // Update UI based on phase
+          if (data.phase === 'whisperx_init') {
+            setIsInitializing(true);
+          } else if (data.phase === 'ready') {
+            setIsInitializing(false);
+            // Clear status message after a brief delay
+            setTimeout(() => setStatusMessage(''), 3000);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to parse data message:', e);
+      }
+    };
+
+    room.on(RoomEvent.DataReceived, handleDataReceived);
+
+    return () => {
+      room.off(RoomEvent.DataReceived, handleDataReceived);
+    };
+  }, [room]);
 
   useEffect(() => {
     if (sessionStarted) {
@@ -157,9 +190,18 @@ export const SessionView = ({
                   sessionStarted && messages.length === 0 && 'pointer-events-none'
                 )}
               >
-                <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
-                  Agent is listening, ask it a question
-                </p>
+                {statusMessage ? (
+                  <p className="inline-block text-sm font-semibold text-blue-500">
+                    {isInitializing && (
+                      <span className="mr-2 inline-block animate-spin">⚙</span>
+                    )}
+                    {statusMessage}
+                  </p>
+                ) : (
+                  <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
+                    Agent is listening, ask it a question
+                  </p>
+                )}
               </motion.div>
             )}
 

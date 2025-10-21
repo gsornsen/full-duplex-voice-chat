@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Last Updated**: 2025-10-17
+**Last Updated**: 2025-10-19
 
 This file provides essential guidance to Claude Code when working with this repository. For detailed documentation, see the [.claude/modules/](.claude/modules/) directory.
 
@@ -25,6 +25,10 @@ This is a **Realtime Duplex Voice Demo** system enabling low-latency speech↔sp
 ### Essential Commands
 
 ```bash
+# Configuration (before starting services)
+cp .env.example .env        # Create local environment config
+nano .env                   # Edit configuration (model selection, GPU settings)
+
 # Quality & CI
 just lint          # Run ruff linting
 just fix           # Auto-fix linting issues
@@ -52,6 +56,23 @@ just logs-clean    # Clean old logs (keep last 20 or 7 days)
 > 🔧 **Full Command Reference**: See [.claude/modules/development.md](.claude/modules/development.md)
 
 ### Development Workflow
+
+**Important: Configure Environment First**
+
+Before starting services, configure your deployment:
+
+```bash
+# For Piper (CPU baseline):
+export ADAPTER_TYPE=piper
+export DEFAULT_MODEL=piper-en-us-lessac-medium
+
+# For CosyVoice (GPU):
+export ADAPTER_TYPE=cosyvoice2
+export DEFAULT_MODEL=cosyvoice2-en-base
+export ASR_DEVICE=auto  # Enable GPU for WhisperX
+```
+
+> 📖 **Configuration Guide**: See [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 
 **Recommended: Unified Development Mode**
 
@@ -249,14 +270,26 @@ just test-integration  # Integration only (with --forked for gRPC)
 
 **Model Switching:**
 ```bash
-# Development mode with different TTS models
+# Configure environment BEFORE starting services
+export ADAPTER_TYPE=piper
+export DEFAULT_MODEL=piper-en-us-lessac-medium
 just dev-agent-piper     # Piper TTS (CPU, realistic speech)
-just dev                 # Legacy orchestrator + Piper
+
+# OR for CosyVoice (GPU):
+export ADAPTER_TYPE=cosyvoice2
+export DEFAULT_MODEL=cosyvoice2-en-base
+export ASR_DEVICE=auto
+just dev cosyvoice2      # CosyVoice 2 (GPU, high quality)
 
 # Docker Compose with profiles
 docker compose up                        # Default: Piper TTS
 docker compose --profile cosyvoice up   # CosyVoice 2 (GPU, isolated)
 ```
+
+**⚠️ Configuration Validation:**
+- System validates adapter/model compatibility at startup
+- Warnings logged if configuration mismatch detected
+- See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all available configuration options
 
 **Adapter Implementation:**
 - Inherit from `tts_base.py` protocol
@@ -329,6 +362,7 @@ just run-orch
 ## References
 
 **Core Documentation:**
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - Configuration guide (TTS/ASR settings)
 - [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) - Implementation status
 - [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md) - Testing commands and strategy
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development workflows

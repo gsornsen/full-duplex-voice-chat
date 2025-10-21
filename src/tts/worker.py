@@ -86,6 +86,34 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
         Args:
             model_manager: ModelManager instance for model lifecycle
         """
+        # Validate adapter/model configuration
+        adapter_type = os.getenv("ADAPTER_TYPE", "mock")
+        default_model = os.getenv("DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL"))
+        
+        logger.info(
+            f"TTS Worker starting with ADAPTER_TYPE={adapter_type}, "
+            f"DEFAULT_MODEL={default_model}"
+        )
+        
+        # Warn if configuration looks suspicious
+        if adapter_type == "mock" and default_model and default_model != "mock":
+            logger.warning(
+                f"⚠️  ADAPTER_TYPE=mock but DEFAULT_MODEL={default_model} - "
+                f"this likely indicates a configuration mismatch. "
+                f"Mock adapter will be used, ignoring model ID."
+            )
+        
+        if (
+            adapter_type == "cosyvoice2"
+            and default_model
+            and not default_model.startswith("cosyvoice2-")
+        ):
+            logger.warning(
+                f"⚠️  ADAPTER_TYPE=cosyvoice2 but DEFAULT_MODEL={default_model} - "
+                f"model ID should start with 'cosyvoice2-' for CosyVoice adapter"
+            )
+        
+
         self.model_manager = model_manager
         self.sessions: dict[str, dict[str, Any]] = {}
         self.adapters: dict[str, Any] = {}
