@@ -56,7 +56,8 @@
       "Read(//home/gerald/git/mycelium/**)",
       "mcp__RedisMCPServer__hset",
       "Read(//home/gerald/.cache/**)",
-      "Read(//home/gerald/**)"
+      "Read(//home/gerald/**)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

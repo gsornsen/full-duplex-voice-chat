@@ -13,6 +13,7 @@ Key features:
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -22,6 +23,7 @@ import torch
 from numpy.typing import NDArray
 
 from src.tts.audio.framing import repacketize_to_20ms
+from src.tts.audio.processing import process_audio_for_streaming
 from src.tts.audio.resampling import resample_audio
 from src.tts.tts_base import AdapterState
 
@@ -46,7 +48,6 @@ snapshot_download: Any = _snapshot_download
 TARGET_SAMPLE_RATE_HZ: Final[int] = 48000  # Required output sample rate
 FRAME_DURATION_MS: Final[int] = 20  # 20ms frames
 SAMPLES_PER_FRAME: Final[int] = 960  # 48000 Hz * 0.020 sec = 960 samples
-INTER_FRAME_DELAY_MS: Final[float] = 2.0  # Small delay to simulate streaming
 WARMUP_TEXT: Final[str] = "Testing warmup synthesis for model initialization."
 
 # CosyVoice 2 specific constants
@@ -57,6 +58,12 @@ COSYVOICE_HF_REPO_ID: Final[str] = "FunAudioLLM/CosyVoice2-0.5B"  # Official Hug
 # mel spectrogram padding. CosyVoice requires >=1440 samples after resampling
 # for 720-sample padding. Using 2s (32000@16kHz → 48000@24kHz) provides margin.
 SILENCE_PROMPT_DURATION_SAMPLES_16KHZ: Final[int] = 32000  # 2 seconds at 16kHz
+
+# Audio normalization: Reduced from 0.95 to 0.85 to prevent resampling overshoots
+# CosyVoice outputs conservative amplitudes (~0.5 peak) to avoid clipping,
+# so we normalize to 85% of full scale to match Piper's loudness levels
+# while leaving 15% headroom for resampling/processing artifacts and fades.
+AUDIO_NORMALIZATION_TARGET_PEAK: Final[float] = 0.85  # 85% of full scale (-1.4 dBFS)
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +198,19 @@ class CosyVoiceAdapter:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # Pre-create silence prompt (cached for reuse across all synthesis calls)
+        # Avoids repeated 128KB allocations + zero-filling on every synthesis
+        # This is a CPU tensor - GPU acceleration happens later in model inference
+        self._silence_prompt_cache = torch.zeros(
+            (1, SILENCE_PROMPT_DURATION_SAMPLES_16KHZ),
+            dtype=torch.float32,
+            device="cpu",
+        )
+        logger.info(
+            "Silence prompt pre-allocated",
+            extra={"samples": SILENCE_PROMPT_DURATION_SAMPLES_16KHZ, "shape": [1, 32000]},
+        )
+
         logger.info(
             "Initializing CosyVoice adapter",
             extra={
@@ -262,8 +282,8 @@ class CosyVoiceAdapter:
         """Generate TTS audio for each text chunk.
 
         For each text chunk, synthesizes audio using CosyVoice 2, resamples to 48kHz,
-        and repacketizes into 20ms PCM frames. Yields frames one at a time with
-        minimal delay to simulate realistic streaming behavior.
+        and repacketizes into 20ms PCM frames. Yields frames as fast as possible to
+        minimize latency.
 
         Args:
             text_chunks: Async iterator of text chunks to synthesize
@@ -323,7 +343,7 @@ class CosyVoiceAdapter:
                     },
                 )
 
-                # Yield frames with streaming delay
+                # Yield frames immediately without artificial delay
                 for frame_idx, frame in enumerate(frames):
                     # Check if stopped (immediate termination)
                     if self.stop_event.is_set():
@@ -339,9 +359,6 @@ class CosyVoiceAdapter:
 
                     # Wait if paused (blocks until RESUME)
                     await self.pause_event.wait()
-
-                    # Small delay to simulate streaming behavior
-                    await asyncio.sleep(INTER_FRAME_DELAY_MS / 1000.0)
 
                     # Check again before yielding (race condition fix)
                     if self.stop_event.is_set():
@@ -394,6 +411,10 @@ class CosyVoiceAdapter:
             raise RuntimeError("Model not loaded")
 
         try:
+            # Performance tracking for Phase 1 optimization analysis
+            timings = {}
+            overall_start = time.perf_counter()
+
             with torch.no_grad():
                 # CosyVoice 2 streaming API
                 # inference_zero_shot() returns a generator of audio chunks
@@ -411,9 +432,11 @@ class CosyVoiceAdapter:
                 # SHAPE FIX: Add batch dimension [1, samples] to match CosyVoice convention
                 # CosyVoice expects batch-first tensors: (batch, time) not just (time)
                 # Without batch dim, library incorrectly reshapes to [samples, 1] vs [1, samples]
-                silence_prompt = torch.zeros(
-                    (1, SILENCE_PROMPT_DURATION_SAMPLES_16KHZ), dtype=torch.float32, device="cpu"
-                )  # Shape: [1, 32000] (batch, time)
+                # Use pre-allocated cached silence prompt (avoid repeated allocation)
+                silence_prompt = self._silence_prompt_cache
+
+                # Stage 1: CosyVoice inference (GPU)
+                inference_start = time.perf_counter()
 
                 for chunk in self.model.inference_zero_shot(
                     tts_text=text,
@@ -427,6 +450,8 @@ class CosyVoiceAdapter:
                     audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
                     audio_chunks.append(audio_tensor)
 
+                timings["inference_ms"] = (time.perf_counter() - inference_start) * 1000
+
                 # Concatenate chunks
                 if not audio_chunks:
                     logger.warning(
@@ -435,22 +460,59 @@ class CosyVoiceAdapter:
                     )
                     return np.zeros(0, dtype=np.int16)
 
-                # Concatenate along sample dimension: (1, total_samples)
+                # Stage 2: Tensor concatenation
+                concat_start = time.perf_counter()
                 audio_tensor = torch.cat(audio_chunks, dim=1)
+                timings["concat_ms"] = (time.perf_counter() - concat_start) * 1000
 
-                # Convert to numpy: (1, samples) -> (samples,)
+                # Stage 3: Audio processing and type conversion
+                convert_start = time.perf_counter()
+
+                # Convert to float32 numpy for processing
                 audio_float = audio_tensor.squeeze(0).cpu().numpy()
 
-                # Convert float32 [-1, 1] to int16 [-32768, 32767]
-                audio_int16 = (audio_float * 32767).clip(-32768, 32767).astype(np.int16)
+                # Apply comprehensive audio processing pipeline
+                # This eliminates pops, clicks, static, and resampling artifacts
+                audio_processed = process_audio_for_streaming(
+                    audio_float,
+                    sample_rate=self.native_sample_rate,
+                    target_peak=AUDIO_NORMALIZATION_TARGET_PEAK,
+                    apply_fades=True,  # 5ms fade-in/out prevents boundary pops
+                    apply_dithering=True,  # Reduces quantization noise
+                )
 
-                logger.debug(
-                    "CosyVoice synthesis complete",
+                # Convert to int16 with proper clipping
+                # Clipping prevents overflow from any remaining processing artifacts
+                audio_int16 = np.clip(audio_processed * 32767.0, -32768, 32767).astype(np.int16)
+
+                timings["convert_ms"] = (time.perf_counter() - convert_start) * 1000
+
+                # Calculate overall performance metrics
+                total_ms = (time.perf_counter() - overall_start) * 1000
+                audio_duration_s = len(audio_int16) / self.native_sample_rate
+                rtf = (total_ms / 1000) / audio_duration_s if audio_duration_s > 0 else 0
+
+                # Measure peak and RMS for quality validation
+                peak = np.abs(audio_int16).max() / 32767.0
+                rms = np.sqrt(np.mean((audio_int16 / 32767.0) ** 2))
+
+                # Log comprehensive performance breakdown for Phase 1 analysis
+                logger.info(
+                    "CosyVoice synthesis performance",
                     extra={
                         "model_id": self.model_id,
                         "text_length": len(text),
+                        "audio_duration_s": round(audio_duration_s, 2),
                         "audio_samples": len(audio_int16),
-                        "audio_duration_ms": len(audio_int16) / self.native_sample_rate * 1000,
+                        "total_ms": round(total_ms, 1),
+                        "rtf": round(rtf, 3),
+                        "inference_ms": round(timings["inference_ms"], 1),
+                        "concat_ms": round(timings["concat_ms"], 1),
+                        "convert_ms": round(timings["convert_ms"], 1),
+                        "inference_pct": round(timings["inference_ms"] / total_ms * 100, 1),
+                        "peak_level": round(peak, 3),
+                        "rms_level": round(rms, 3),
+                        "target_peak": AUDIO_NORMALIZATION_TARGET_PEAK,
                     },
                 )
 

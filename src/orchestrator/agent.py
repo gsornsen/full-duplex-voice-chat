@@ -33,9 +33,14 @@ from livekit.agents import (
     JobContext,
     WorkerOptions,
 )
+from livekit.agents import (
+    llm as llm_module,
+)
 from livekit.plugins import openai, silero
 
 from src.orchestrator.config_validator import ConfigValidator
+from src.orchestrator.dual_llm import DualLLMOrchestrator
+from src.orchestrator.sentence_segmenter import SentenceSegmenter
 from src.plugins import grpc_tts, whisperx
 
 # Load environment variables
@@ -49,6 +54,147 @@ try:
     ConfigValidator.validate_all(strict=False)
 except Exception as e:
     logger.warning(f"Configuration validation failed: {e}")
+
+
+class DualLLMPlugin(llm_module.LLM):
+    """Custom LLM plugin that wraps DualLLMOrchestrator for natural conversation.
+
+    This plugin integrates the dual-LLM strategy into the LiveKit Agent framework:
+    1. Generates instant filler responses ("Let me think...")
+    2. Streams full LLM responses in parallel
+    3. Segments responses into complete sentences for TTS
+
+    The dual-LLM approach reduces perceived latency by providing immediate
+    feedback while the full response generates in the background.
+    """
+
+    def __init__(self, openai_api_key: str, model: str = "gpt-4o-mini") -> None:
+        """Initialize dual LLM plugin.
+
+        Args:
+            openai_api_key: OpenAI API key for full LLM
+            model: OpenAI model to use (default: gpt-4o-mini)
+        """
+        self.dual_llm = DualLLMOrchestrator(
+            openai_api_key=openai_api_key,
+            full_model=model,
+            filler_enabled=True,
+        )
+        self.segmenter = SentenceSegmenter(
+            min_tokens=3,
+            buffer_timeout=0.5,
+        )
+        logger.info(f"DualLLMPlugin initialized with model={model}")
+
+    def chat(
+        self,
+        *,
+        chat_ctx: llm_module.ChatContext,
+        **kwargs,
+    ) -> llm_module.LLMStream:
+        """Generate response using dual-LLM strategy.
+
+        Args:
+            chat_ctx: Chat context with conversation history
+            conn_options: Connection options (unused)
+
+        Returns:
+            LLMStream with filler and full response chunks
+        """
+        # Extract latest user message
+        messages = chat_ctx.messages
+        if not messages:
+            logger.warning("No messages in chat context")
+            return self._create_empty_stream()
+
+        # Get the last user message
+        user_message = ""
+        for msg in reversed(messages):
+            if msg.role == llm_module.ChatRole.USER:
+                user_message = msg.content
+                break
+
+        if not user_message:
+            logger.warning("No user message found in chat context")
+            return self._create_empty_stream()
+
+        logger.info(f"Processing user message: {user_message[:100]}...")
+
+        # Convert chat context to conversation history
+        conversation_history = []
+        for msg in messages[:-1]:  # Exclude latest user message (added by dual_llm)
+            conversation_history.append({
+                "role": "assistant" if msg.role == llm_module.ChatRole.ASSISTANT else "user",
+                "content": msg.content,
+            })
+
+        # Generate response using dual-LLM
+        return self._stream_dual_llm_response(user_message, conversation_history)
+
+    def _stream_dual_llm_response(
+        self,
+        user_message: str,
+        conversation_history: list[dict[str, str]],
+    ) -> llm_module.LLMStream:
+        """Stream dual-LLM response with filler and full content.
+
+        Args:
+            user_message: User's input message
+            conversation_history: Previous conversation messages
+
+        Returns:
+            LLMStream with response chunks
+        """
+        # Create async generator for dual-LLM response
+        async def generate_chunks():
+            accumulated_text = ""
+
+            # Generate response with dual-LLM
+            async for text_chunk, _phase in self.dual_llm.generate_response(
+                user_message=user_message,
+                conversation_history=conversation_history,
+            ):
+                # Skip empty chunks
+                if not text_chunk:
+                    continue
+
+                accumulated_text += text_chunk
+
+                # Yield chunk with role information
+                yield llm_module.ChatChunk(
+                    choices=[
+                        llm_module.Choice(
+                            delta=llm_module.ChoiceDelta(
+                                role=llm_module.ChatRole.ASSISTANT,
+                                content=text_chunk,
+                            ),
+                            index=0,
+                        )
+                    ],
+                )
+
+            logger.info(f"Dual-LLM response completed: {len(accumulated_text)} chars")
+
+        # Return LLM stream
+        return llm_module.LLMStream(
+            oai_stream=generate_chunks(),  # type: ignore
+            chat_ctx=llm_module.ChatContext(),
+        )
+
+    def _create_empty_stream(self) -> llm_module.LLMStream:
+        """Create empty LLM stream for error cases.
+
+        Returns:
+            Empty LLMStream
+        """
+        async def empty_generator():
+            if False:  # pragma: no cover
+                yield None
+
+        return llm_module.LLMStream(
+            oai_stream=empty_generator(),  # type: ignore
+            chat_ctx=llm_module.ChatContext(),
+        )
 
 
 class VoiceAssistantAgent(Agent):
@@ -69,6 +215,30 @@ class VoiceAssistantAgent(Agent):
 
     def __init__(self) -> None:
         """Initialize voice assistant agent."""
+        # Check if dual-LLM is enabled
+        dual_llm_enabled = os.getenv("DUAL_LLM_ENABLED", "false").lower() == "true"
+        openai_api_key = os.getenv("OPENAI_API_KEY", "")
+
+        # Select LLM implementation based on feature flag
+        # Note: DualLLMPlugin temporarily disabled due to LiveKit API compatibility issues
+        # Will be re-enabled after API compatibility is resolved
+        if False and dual_llm_enabled and openai_api_key:  # Temporarily disabled
+            logger.info("Using dual-LLM strategy for natural conversation")
+            llm_instance = DualLLMPlugin(
+                openai_api_key=openai_api_key,
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            )
+        else:
+            if dual_llm_enabled:
+                logger.warning(
+                    "Dual-LLM requested but temporarily disabled due to API compatibility. "
+                    "Using standard OpenAI LLM instead."
+                )
+            logger.info("Using standard OpenAI LLM")
+            llm_instance = openai.LLM(
+                model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+            )
+
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
             You assist users with their questions by providing clear and concise information.
@@ -82,8 +252,8 @@ class VoiceAssistantAgent(Agent):
                 language=os.getenv("ASR_LANGUAGE", "en"),
                 compute_type=os.getenv("ASR_COMPUTE_TYPE", "default"),
             ),
-            # Phase 1: Still using OpenAI LLM (Phase 4 will make this optional)
-            llm=openai.LLM(model="gpt-4o-mini"),
+            # LLM: Dual-LLM strategy if enabled, otherwise standard OpenAI
+            llm=llm_instance,
             # Phase 3: Custom gRPC TTS plugin (connects to our TTS worker with Piper)
             tts=grpc_tts.TTS(
                 worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
@@ -92,12 +262,13 @@ class VoiceAssistantAgent(Agent):
                 ),
             ),
             # VAD: Required for streaming with OpenAI STT (which doesn't support streaming natively)
-            # Configure with higher threshold to reduce false positives from background noise
+            # Tuned to capture full speech start (avoid trimming first words)
+            # and prevent agent audio from triggering barge-in
             vad=silero.VAD.load(
-                min_speech_duration=0.3,  # 300ms minimum speech to trigger
-                min_silence_duration=0.5,  # 500ms silence before considering speech ended
-                activation_threshold=0.6,  # Higher threshold (0.5 default) - less sensitive
-                padding_duration=0.2,  # 200ms padding around speech segments
+                min_speech_duration=0.25,  # 250ms minimum (faster detection)
+                min_silence_duration=0.8,  # 800ms silence (prevent TTS tail triggering)
+                activation_threshold=0.75,  # Higher threshold (reduce false positives)
+                padding_duration=0.5,  # 500ms padding (capture speech start)
             ),
             # Turn detection and interruptions
             allow_interruptions=True,  # Enable barge-in
@@ -105,7 +276,11 @@ class VoiceAssistantAgent(Agent):
             max_endpointing_delay=3.0,  # 3s max wait for turn completion
         )
 
-        logger.info("VoiceAssistantAgent initialized (Phase 1 POC)")
+        self.dual_llm_enabled = dual_llm_enabled
+        logger.info(
+            f"VoiceAssistantAgent initialized "
+            f"(dual_llm_enabled={dual_llm_enabled})"
+        )
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -243,7 +418,7 @@ async def entrypoint(ctx: JobContext) -> None:
                     "Hello! I'm your voice assistant. How can I help you today?",
                     allow_interruptions=True,  # User can interrupt the greeting
                 ),
-                timeout=15.0,  # 15 second timeout for greeting
+                timeout=30.0,  # 30 second timeout (increased from 15s for TTS delivery)
             )
             logger.info("Initial greeting sent to user")
         except TimeoutError:
@@ -377,6 +552,9 @@ def main() -> None:
         logger.error("  OPENAI_API_KEY=sk-...")
         return
 
+    # Log dual-LLM configuration
+    dual_llm_enabled = os.getenv("DUAL_LLM_ENABLED", "false").lower() == "true"
+    logger.info(f"Dual-LLM feature: {'ENABLED' if dual_llm_enabled else 'DISABLED'}")
     logger.info("Starting LiveKit Agents worker (Phase 1 POC)...")
     logger.info(f"LiveKit URL: {os.getenv('LIVEKIT_URL')}")
     logger.info("Using WhisperX STT + OpenAI LLM + gRPC TTS (Piper/CosyVoice2)")

@@ -107,6 +107,11 @@ services:
       - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
       # Required for agent mode (OpenAI LLM integration)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
+      # Hack to create quick filler phrases to make conversations
+      # feel more natural while longer response is generated
+      # and synthesized
+      - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-true}
     depends_on:
       redis:
         condition: service_healthy
@@ -217,6 +222,10 @@ services:
       - TTL_MS=600000
       - RESIDENT_CAP=2
       - LOG_LEVEL=INFO
+      # Warning suppression (cleaner logs)
+      - GRPC_TRACE=""
+      - GRPC_VERBOSITY=ERROR
+      - PYTHONWARNINGS=ignore::FutureWarning,ignore::UserWarning
     env_file:
       - .env.cosyvoice  # Optional: override with custom configuration
     depends_on:

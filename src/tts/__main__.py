@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+# Suppress third-party warnings before other imports
+import src.tts.suppress_warnings  # noqa: F401
 from src.tts.config import TTSWorkerConfig
 from src.tts.worker import start_worker
 
