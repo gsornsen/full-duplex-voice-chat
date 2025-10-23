@@ -6,14 +6,17 @@ Tests cover:
 - Sentence queue buffering with overflow strategies
 - Audio frame buffering and streaming
 - Timing coordination and transition gap measurement
+- Crossfade integration for seamless transitions
 - Error handling and cleanup
 - Metrics tracking
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import numpy as np
 import pytest
 
 from src.orchestrator.response_buffer import (
@@ -184,7 +187,7 @@ class TestFillerPlayback:
         # Mock TTS client that raises error
         mock_tts = AsyncMock()
 
-        async def error_synthesize(*args, **kwargs) -> AsyncIterator[bytes]:  # type: ignore[misc]
+        async def error_synthesize(*args: object, **kwargs: object) -> AsyncIterator[bytes]:
             raise Exception("TTS synthesis failed")
             yield  # Make this a generator
 
@@ -401,6 +404,103 @@ class TestStreamingFrames:
         assert buffer.metrics.transition_gap_ms > 0
         assert frames[0] == b"\x00" * 1920
 
+    async def test_stream_buffered_frames_applies_crossfade(
+        self, buffer: ResponseBuffer
+    ) -> None:
+        """Test crossfade is applied between filler and buffered frames."""
+        # Create realistic audio frames with different DC offsets
+        # Filler frame (last): positive DC offset
+        filler_audio = (
+            (np.ones(960, dtype=np.float32) * 0.5 * 32768.0)
+            .clip(-32768, 32767)
+            .astype(np.int16)
+        )
+        buffer._filler_frames = [filler_audio.tobytes()]
+
+        # Buffered frame (first): negative DC offset
+        buffered_audio = (
+            (np.ones(960, dtype=np.float32) * -0.3 * 32768.0)
+            .clip(-32768, 32767)
+            .astype(np.int16)
+        )
+        await buffer.audio_queue.put(buffered_audio.tobytes())
+
+        # Setup timing
+        buffer._filler_end_ts = asyncio.get_event_loop().time()
+        buffer._actual_filler_duration_ms = 1000.0
+
+        # Signal TTS task done
+        buffer._tts_task = asyncio.create_task(asyncio.sleep(0))
+        await buffer._tts_task
+
+        # Stream frames (should apply crossfade)
+        frames = [f async for f in buffer._stream_buffered_frames()]
+
+        # Verify crossfade was applied
+        assert len(frames) == 1
+        assert buffer.metrics.crossfade_applied is True
+
+        # Verify frame was modified (not identical to original)
+        assert frames[0] != buffered_audio.tobytes()
+
+        # Verify frame is still valid PCM audio
+        crossfaded = np.frombuffer(frames[0], dtype=np.int16)
+        assert len(crossfaded) > 0
+        assert crossfaded.dtype == np.int16
+
+    async def test_stream_buffered_frames_handles_empty_filler(
+        self, buffer: ResponseBuffer
+    ) -> None:
+        """Test crossfade handles case with no filler frames."""
+        # No filler frames
+        buffer._filler_frames = []
+
+        # Add buffered frame
+        buffered_frame = b"\x00" * 1920
+        await buffer.audio_queue.put(buffered_frame)
+
+        # Setup timing
+        buffer._filler_end_ts = asyncio.get_event_loop().time()
+        buffer._actual_filler_duration_ms = 0.0
+
+        # Signal TTS task done
+        buffer._tts_task = asyncio.create_task(asyncio.sleep(0))
+        await buffer._tts_task
+
+        # Stream frames (should skip crossfade)
+        frames = [f async for f in buffer._stream_buffered_frames()]
+
+        # Verify no crossfade was applied
+        assert len(frames) == 1
+        assert buffer.metrics.crossfade_applied is False
+        assert frames[0] == buffered_frame
+
+    async def test_stream_buffered_frames_handles_short_buffers(
+        self, buffer: ResponseBuffer
+    ) -> None:
+        """Test crossfade handles short buffers gracefully (falls back to concatenation)."""
+        # Create filler frame with short size
+        buffer._filler_frames = [b"\x00" * 10]  # Too short for crossfade
+
+        # Add normal buffered frame
+        buffered_frame = b"\x00" * 1920
+        await buffer.audio_queue.put(buffered_frame)
+
+        # Setup timing
+        buffer._filler_end_ts = asyncio.get_event_loop().time()
+        buffer._actual_filler_duration_ms = 1000.0
+
+        # Signal TTS task done
+        buffer._tts_task = asyncio.create_task(asyncio.sleep(0))
+        await buffer._tts_task
+
+        # Stream frames (crossfade succeeds with concatenation fallback)
+        frames = [f async for f in buffer._stream_buffered_frames()]
+
+        # Verify crossfade was applied (with concatenation fallback)
+        assert len(frames) == 1
+        assert buffer.metrics.crossfade_applied is True
+
 
 class TestCompleteWorkflow:
     """Test complete buffering workflow."""
@@ -444,7 +544,7 @@ class TestCompleteWorkflow:
 
         # Start buffering and cancel
         buffer_coro = buffer.buffer_during_filler(filler_text, slow_stream())
-        task = asyncio.create_task(buffer_coro.__anext__())
+        task = asyncio.create_task(cast("Coroutine[Any, Any, bytes]", buffer_coro.__anext__()))
 
         await asyncio.sleep(0.1)
         task.cancel()
@@ -459,7 +559,7 @@ class TestCompleteWorkflow:
         # Mock TTS that fails
         mock_tts = AsyncMock()
 
-        async def error_synthesize(*args, **kwargs) -> AsyncIterator[bytes]:  # type: ignore[misc]
+        async def error_synthesize(*args: object, **kwargs: object) -> AsyncIterator[bytes]:
             raise Exception("Synthesis error")
             yield
 
@@ -492,6 +592,7 @@ class TestMetrics:
             "buffered_audio_frames",
             "transition_gap_ms",
             "transition_overlap_ms",
+            "crossfade_applied",
             "overflow_events",
             "slow_llm_fallback",
             "fast_filler_fallback",

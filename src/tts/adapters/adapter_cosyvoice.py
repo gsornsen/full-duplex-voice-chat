@@ -211,6 +211,9 @@ class CosyVoiceAdapter:
             extra={"samples": SILENCE_PROMPT_DURATION_SAMPLES_16KHZ, "shape": [1, 32000]},
         )
 
+        # Synthesis counter for telemetry (track first vs subsequent)
+        self._synthesis_count = 0
+
         logger.info(
             "Initializing CosyVoice adapter",
             extra={
@@ -438,17 +441,37 @@ class CosyVoiceAdapter:
                 # Stage 1: CosyVoice inference (GPU)
                 inference_start = time.perf_counter()
 
-                for chunk in self.model.inference_zero_shot(
-                    tts_text=text,
-                    prompt_text="",  # Empty for default voice
-                    prompt_speech_16k=silence_prompt,  # torch.Tensor instead of np.ndarray
-                    stream=False,  # Use batch mode for simplicity (M6)
-                    speed=1.0,
-                ):
-                    # Extract audio tensor from chunk dict
-                    # Expected format: {'tts_speech': torch.Tensor}
-                    audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
-                    audio_chunks.append(audio_tensor)
+                # Retry logic for numerical instability in CosyVoice sampling
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        for chunk in self.model.inference_zero_shot(
+                            tts_text=text,
+                            prompt_text="",  # Empty for default voice
+                            prompt_speech_16k=silence_prompt,  # torch.Tensor
+                            stream=False,  # Use batch mode for simplicity (M6)
+                            speed=1.0,
+                        ):
+                            # Extract audio tensor from chunk dict
+                            # Expected format: {'tts_speech': torch.Tensor}
+                            audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
+                            audio_chunks.append(audio_tensor)
+                        break  # Success!
+                    except RuntimeError as e:
+                        if "probability tensor" in str(e) and attempt < max_retries - 1:
+                            logger.warning(
+                                f"CosyVoice sampling error (attempt {attempt + 1}/{max_retries}), "
+                                f"retrying... Error: {e}",
+                                extra={"model_id": self.model_id, "text_length": len(text)},
+                            )
+                            audio_chunks.clear()  # Clear partial results
+                            continue
+                        else:
+                            logger.error(
+                                f"CosyVoice synthesis failed after {max_retries} attempts",
+                                extra={"model_id": self.model_id, "error": str(e)},
+                            )
+                            raise
 
                 timings["inference_ms"] = (time.perf_counter() - inference_start) * 1000
 
@@ -496,6 +519,10 @@ class CosyVoiceAdapter:
                 peak = np.abs(audio_int16).max() / 32767.0
                 rms = np.sqrt(np.mean((audio_int16 / 32767.0) ** 2))
 
+                # TELEMETRY: Track first vs subsequent synthesis for performance analysis
+                is_first_synthesis = (self._synthesis_count == 0)
+                self._synthesis_count += 1
+
                 # Log comprehensive performance breakdown for Phase 1 analysis
                 logger.info(
                     "CosyVoice synthesis performance",
@@ -506,6 +533,8 @@ class CosyVoiceAdapter:
                         "audio_samples": len(audio_int16),
                         "total_ms": round(total_ms, 1),
                         "rtf": round(rtf, 3),
+                        "is_first_synthesis": is_first_synthesis,  # Track first vs subsequent
+                        "synthesis_number": self._synthesis_count,
                         "inference_ms": round(timings["inference_ms"], 1),
                         "concat_ms": round(timings["concat_ms"], 1),
                         "convert_ms": round(timings["convert_ms"], 1),
@@ -739,4 +768,6 @@ class CosyVoiceAdapter:
             self.state = AdapterState.IDLE
             self.pause_event.set()
             self.stop_event.clear()
+            # Reset synthesis counter
+            self._synthesis_count = 0
             logger.info("Adapter reset to initial state", extra={"model_id": self.model_id})

@@ -107,11 +107,14 @@ services:
       - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
       # Required for agent mode (OpenAI LLM integration)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
-      # Hack to create quick filler phrases to make conversations
-      # feel more natural while longer response is generated
-      # and synthesized
-      - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-true}
+      # Parallel Synthesis (eliminate gaps between sentences)
+      - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
+      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-2}
+      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-2}
+      # Continuation Detection (merge thinking pauses)
+      - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-false}
+      # Dual-LLM Configuration (currently disabled due to API compatibility)
+      - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
     depends_on:
       redis:
         condition: service_healthy

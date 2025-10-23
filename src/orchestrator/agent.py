@@ -24,6 +24,7 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from dotenv import load_dotenv
 from livekit import agents
@@ -39,8 +40,11 @@ from livekit.agents import (
 from livekit.plugins import openai, silero
 
 from src.orchestrator.config_validator import ConfigValidator
+from src.orchestrator.continuation_detector import ContinuationDetector
 from src.orchestrator.dual_llm import DualLLMOrchestrator
+from src.orchestrator.parallel_tts import ParallelSynthesisPipeline
 from src.orchestrator.sentence_segmenter import SentenceSegmenter
+from src.orchestrator.transcript_buffer import TranscriptBuffer
 from src.plugins import grpc_tts, whisperx
 
 # Load environment variables
@@ -239,6 +243,14 @@ class VoiceAssistantAgent(Agent):
                 model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
             )
 
+        # Store TTS client reference for parallel synthesis
+        self._tts_client = grpc_tts.TTS(
+            worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+            model_id=os.getenv(
+                "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
+            ),
+        )
+
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
             You assist users with their questions by providing clear and concise information.
@@ -255,12 +267,7 @@ class VoiceAssistantAgent(Agent):
             # LLM: Dual-LLM strategy if enabled, otherwise standard OpenAI
             llm=llm_instance,
             # Phase 3: Custom gRPC TTS plugin (connects to our TTS worker with Piper)
-            tts=grpc_tts.TTS(
-                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
-                model_id=os.getenv(
-                    "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
-                ),
-            ),
+            tts=self._tts_client,
             # VAD: Required for streaming with OpenAI STT (which doesn't support streaming natively)
             # Tuned to capture full speech start (avoid trimming first words)
             # and prevent agent audio from triggering barge-in
@@ -277,9 +284,50 @@ class VoiceAssistantAgent(Agent):
         )
 
         self.dual_llm_enabled = dual_llm_enabled
+
+        # Initialize continuation detection (Phase 1)
+        self.continuation_enabled = (
+            os.getenv("ENABLE_CONTINUATION_DETECTION", "false").lower() == "true"
+        )
+        if self.continuation_enabled:
+            self.continuation_detector = ContinuationDetector()
+            self.transcript_buffer = TranscriptBuffer(max_size=10, ttl_seconds=30.0)
+            logger.info("Continuation detection enabled")
+        else:
+            self.continuation_detector = None
+            self.transcript_buffer = None
+            logger.info("Continuation detection disabled")
+
+        # Initialize parallel synthesis pipeline (Phase C)
+        self.parallel_synthesis_enabled = (
+            os.getenv("PARALLEL_SYNTHESIS_ENABLED", "false").lower() == "true"
+        )
+        if self.parallel_synthesis_enabled:
+            num_workers = int(os.getenv("PARALLEL_SYNTHESIS_NUM_WORKERS", "2"))
+            max_queue_depth = int(os.getenv("PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH", "10"))
+            gpu_limit_str = os.getenv("PARALLEL_SYNTHESIS_GPU_LIMIT", "2")
+            gpu_limit = int(gpu_limit_str) if gpu_limit_str.lower() != "none" else None
+
+            self.parallel_tts = ParallelSynthesisPipeline(
+                tts_adapter=self._tts_client,
+                num_workers=num_workers,
+                max_sentence_queue=max_queue_depth,
+                max_gpu_concurrent=gpu_limit,
+            )
+            logger.info(
+                f"Parallel synthesis enabled (workers={num_workers}, "
+                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})"
+            )
+        else:
+            self.parallel_tts = None
+            logger.info("Parallel synthesis disabled (using standard TTS)")
+
+
         logger.info(
             f"VoiceAssistantAgent initialized "
-            f"(dual_llm_enabled={dual_llm_enabled})"
+            f"(dual_llm_enabled={dual_llm_enabled}, "
+            f"continuation_enabled={self.continuation_enabled}, "
+            f"parallel_synthesis_enabled={self.parallel_synthesis_enabled})"
         )
 
 
@@ -394,6 +442,31 @@ async def entrypoint(ctx: JobContext) -> None:
         except Exception as e:
             logger.error(f"Failed to verify WhisperX STT: {e}", exc_info=True)
             raise
+
+        # SOLUTION A: Eager TTS Warm-Up
+        # Warm up TTS model to eliminate cold-start CUDA compilation latency
+        # This prevents 1-2 second delay on first greeting synthesis
+        logger.info("Warming up TTS model...")
+        try:
+            # Access TTS plugin and warm up
+            tts_plugin = agent._tts
+            if tts_plugin is not None and hasattr(tts_plugin, 'warm_up'):
+                warm_up_start = time.perf_counter()
+                await asyncio.wait_for(
+                    tts_plugin.warm_up(),  # type: ignore[attr-defined]
+                    timeout=30.0,
+                )
+                warm_up_duration = time.perf_counter() - warm_up_start
+                logger.info(f"TTS model warmed up successfully in {warm_up_duration:.2f}s")
+            else:
+                logger.warning(
+                    f"TTS plugin does not implement warm_up() (got {type(tts_plugin).__name__}), "
+                    "skipping warm-up"
+                )
+        except TimeoutError:
+            logger.warning("TTS warm-up timed out after 30s (non-fatal)")
+        except Exception as e:
+            logger.warning(f"TTS warm-up failed (non-fatal): {e}")
 
         # Send status update: ready
         try:
@@ -554,7 +627,10 @@ def main() -> None:
 
     # Log dual-LLM configuration
     dual_llm_enabled = os.getenv("DUAL_LLM_ENABLED", "false").lower() == "true"
+    parallel_synthesis_enabled = os.getenv("PARALLEL_SYNTHESIS_ENABLED", "false").lower() == "true"
+
     logger.info(f"Dual-LLM feature: {'ENABLED' if dual_llm_enabled else 'DISABLED'}")
+    logger.info(f"Parallel synthesis: {'ENABLED' if parallel_synthesis_enabled else 'DISABLED'}")
     logger.info("Starting LiveKit Agents worker (Phase 1 POC)...")
     logger.info(f"LiveKit URL: {os.getenv('LIVEKIT_URL')}")
     logger.info("Using WhisperX STT + OpenAI LLM + gRPC TTS (Piper/CosyVoice2)")

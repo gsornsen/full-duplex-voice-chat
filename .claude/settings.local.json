@@ -57,7 +57,8 @@
       "mcp__RedisMCPServer__hset",
       "Read(//home/gerald/.cache/**)",
       "Read(//home/gerald/**)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(mypy:*)"
     ],
     "deny": [],
     "ask": []

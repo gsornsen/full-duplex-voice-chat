@@ -7,7 +7,7 @@ Key Features:
 - Parallel stream coordination (filler LLM, filler TTS, full LLM, buffered TTS)
 - Accurate timing coordination with adaptive lead time
 - Bounded buffering with overflow strategies
-- Seamless audio transition with minimal gap
+- Seamless audio transition with crossfade to eliminate clicks
 - Comprehensive edge case handling
 - Production-ready metrics and monitoring
 
@@ -35,6 +35,10 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
+import numpy as np
+
+from src.tts.audio.processing import crossfade_buffers
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +114,7 @@ class FillerMetrics:
     # Transition timing
     transition_gap_ms: float = 0.0  # Gap between filler end and buffer start
     transition_overlap_ms: float = 0.0  # Overlap (negative gap)
+    crossfade_applied: bool = False  # Whether crossfade was applied
 
     # Full response timing
     full_llm_start_ts: float = 0.0
@@ -161,7 +166,7 @@ class ResponseBuffer:
     Key Features:
     - Accurate filler duration tracking
     - Bounded sentence and audio buffering
-    - Seamless audio transition with crossfade
+    - Seamless audio transition with crossfade (eliminates clicks)
     - Overflow handling with backpressure
     - Edge case handling (slow LLM, fast filler, barge-in)
 
@@ -232,6 +237,7 @@ class ResponseBuffer:
                 "max_buffered_sentences": config.max_buffered_sentences,
                 "max_buffered_audio_frames": config.max_buffered_audio_frames,
                 "overflow_strategy": config.overflow_strategy.value,
+                "crossfade_ms": config.transition_crossfade_ms,
             },
         )
 
@@ -294,7 +300,7 @@ class ResponseBuffer:
         1. Starts filler TTS synthesis and playback
         2. Starts buffering sentences from full_response_stream
         3. Monitors timing to determine when to start buffered TTS
-        4. Handles seamless transition from filler to buffered audio
+        4. Handles seamless transition from filler to buffered audio with crossfade
         5. Streams buffered audio frames to caller
 
         Args:
@@ -341,7 +347,7 @@ class ResponseBuffer:
             logger.info("Transitioning from filler to buffered response")
             self.state = BufferState.PLAYING_BUFFER
 
-            # Stream buffered audio frames
+            # Stream buffered audio frames (with crossfade on first frame)
             async for frame in self._stream_buffered_frames():
                 yield frame
 
@@ -667,12 +673,21 @@ class ResponseBuffer:
             yield frame
 
     async def _stream_buffered_frames(self) -> AsyncIterator[bytes]:
-        """Stream buffered audio frames with seamless transition.
+        """Stream buffered audio frames with crossfade from filler.
+
+        Applies crossfade between the last filler frame and first buffered frame
+        to eliminate audio boundary clicks caused by DC offset discontinuities.
 
         Measures transition timing (gap/overlap) for monitoring.
 
         Yields:
             Audio frames (bytes) from buffered TTS synthesis
+
+        Notes:
+            - Crossfade only applies to first frame transition
+            - Uses config.transition_crossfade_ms for crossfade duration
+            - Handles PCM int16 ↔ float32 conversion for processing
+            - Falls back to direct concatenation if buffers too short
         """
         # Calculate transition timing
         if self._filler_end_ts and self._actual_filler_duration_ms:
@@ -695,11 +710,69 @@ class ResponseBuffer:
             if self.metrics.transition_gap_ms > self.config.silence_gap_ms:
                 self.metrics.slow_llm_fallback = True
 
+        # Get last filler frame for crossfade
+        last_filler_frame: bytes | None = (
+            self._filler_frames[-1] if self._filler_frames else None
+        )
+
+        first_frame = True
+
         # Stream buffered frames
         while True:
             try:
                 frame = await asyncio.wait_for(self.audio_queue.get(), timeout=0.5)
+
+                # Apply crossfade on first buffered frame
+                if first_frame and last_filler_frame:
+                    try:
+                        # Convert int16 PCM to float32 for processing
+                        filler_float = (
+                            np.frombuffer(last_filler_frame, dtype=np.int16).astype(
+                                np.float32
+                            )
+                            / 32768.0
+                        )
+                        buffered_float = (
+                            np.frombuffer(frame, dtype=np.int16).astype(np.float32)
+                            / 32768.0
+                        )
+
+                        # Apply crossfade to eliminate boundary clicks
+                        merged = crossfade_buffers(
+                            filler_float,
+                            buffered_float,
+                            crossfade_ms=self.config.transition_crossfade_ms,
+                            sample_rate=48000,
+                        )
+
+                        # Convert back to int16 PCM
+                        merged_int16 = (
+                            (merged * 32768.0).clip(-32768, 32767).astype(np.int16)
+                        )
+                        frame = merged_int16.tobytes()
+
+                        self.metrics.crossfade_applied = True
+                        logger.info(
+                            "Applied crossfade to filler→buffered transition",
+                            extra={
+                                "crossfade_ms": self.config.transition_crossfade_ms,
+                                "filler_samples": len(filler_float),
+                                "buffered_samples": len(buffered_float),
+                                "merged_samples": len(merged),
+                            },
+                        )
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to apply crossfade, using direct transition: {e}",
+                            exc_info=True,
+                        )
+                        # Fall back to direct frame (no crossfade)
+
+                    first_frame = False
+
                 yield frame
+
             except TimeoutError:
                 # Check if TTS task is complete
                 if (
@@ -746,6 +819,7 @@ class ResponseBuffer:
             "buffered_audio_frames": self.metrics.buffered_audio_frames,
             "transition_gap_ms": self.metrics.transition_gap_ms,
             "transition_overlap_ms": self.metrics.transition_overlap_ms,
+            "crossfade_applied": self.metrics.crossfade_applied,
             "overflow_events": self.metrics.overflow_events,
             "slow_llm_fallback": self.metrics.slow_llm_fallback,
             "fast_filler_fallback": self.metrics.fast_filler_fallback,
