@@ -145,9 +145,17 @@ class TestStreamingResampler:
         # Output should be on CPU
         assert output.device.type == "cpu"
 
+    @pytest.mark.gpu
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_process_gpu_acceleration(self) -> None:
-        """Test GPU-accelerated resampling."""
+        """Test GPU-accelerated resampling.
+
+        This test requires an actual CUDA-capable GPU to validate:
+        - GPU device allocation
+        - CUDA tensor operations
+        - GPU memory management
+        - Performance characteristics of GPU-based resampling
+        """
         resampler = StreamingResampler(
             input_rate=24000,
             output_rate=48000,
@@ -371,9 +379,17 @@ class TestFrameBuffer:
         if buffer.buffer is not None:
             assert buffer.buffer.device.type == "cpu"
 
+    @pytest.mark.gpu
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_push_gpu_processing(self) -> None:
-        """Test GPU-based frame buffering."""
+        """Test GPU-based frame buffering.
+
+        This test requires an actual CUDA-capable GPU to validate:
+        - GPU device allocation
+        - CUDA tensor operations
+        - GPU memory management
+        - Frame buffering on GPU device
+        """
         buffer = FrameBuffer(frame_size=960, sample_rate=48000, device="cuda")
 
         samples = torch.randn(1920, device="cuda")
