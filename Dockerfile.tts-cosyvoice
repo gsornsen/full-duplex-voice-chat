@@ -32,6 +32,9 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 # Create app directory
 WORKDIR /app
 
+# Create Triton autotune directory (prevents df error from DeepSpeed)
+RUN mkdir -p /root/.triton/autotune
+
 # Install uv for fast dependency management
 RUN pip3 install --no-cache-dir uv
 
@@ -44,20 +47,31 @@ RUN pip3 install --no-cache-dir \
     torchaudio==2.3.1 \
     --index-url https://download.pytorch.org/whl/cu121
 
-# Install CosyVoice 2 dependencies
-# Note: CosyVoice repository will be cloned at runtime or mounted as volume
+# Install CosyVoice 2 dependencies (excluding modelscope - using huggingface_hub instead)
 RUN pip3 install --no-cache-dir \
     numpy==1.26.4 \
     scipy==1.13.0 \
     soundfile \
     librosa \
-    modelscope \
     pydantic \
     pyyaml \
     grpcio \
     grpcio-tools \
     protobuf \
-    redis
+    redis \
+    huggingface-hub
+
+# Clone and install CosyVoice repository
+# CosyVoice doesn't have setup.py, so we install dependencies and add to PYTHONPATH
+RUN mkdir -p /app/third_party && \
+    git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git /app/third_party/CosyVoice && \
+    cd /app/third_party/CosyVoice && \
+    git submodule update --init --recursive && \
+    pip3 install --no-cache-dir -r requirements.txt && \
+    rm -rf .git  # Remove .git to reduce image size
+
+# Add CosyVoice and Matcha-TTS to Python path
+ENV PYTHONPATH="/app/third_party/CosyVoice:/app/third_party/CosyVoice/third_party/Matcha-TTS:${PYTHONPATH}"
 
 # Copy application code
 COPY src/ ./src/
@@ -88,7 +102,5 @@ EXPOSE 7001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python3 -c "import grpc; channel = grpc.insecure_channel('localhost:7001'); channel.close()" || exit 1
 
-# Default command (DEFAULT_MODEL can be overridden via environment variable in docker-compose.yml)
-CMD ["python3", "-m", "src.tts.worker", \
-     "--adapter", "cosyvoice2", \
-     "--port", "7001"]
+# Default command (adapter and model read from environment variables)
+CMD ["python3", "-m", "src.tts", "--port", "7001"]

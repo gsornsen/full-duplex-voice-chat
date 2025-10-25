@@ -1,0 +1,78 @@
+# CIRun Configuration for GPU CI
+# Provides on-demand GPU runners for testing GPU-accelerated features
+# Documentation: https://docs.cirun.io/reference/configuration
+
+version: "1.0"
+
+# GPU runner configuration for PyTorch CUDA tests
+# Uses T4 16GB GPU for cost-effective testing
+runners:
+  - name: "cirun-gpu-runner"
+    # Cloud provider: AWS (better spot instance availability and pricing)
+    cloud: "aws"
+
+    # Instance type: g4dn.xlarge
+    # - 1x NVIDIA T4 GPU (16GB VRAM)
+    # - 4 vCPUs, 16 GB RAM
+    # - Cost-effective for CI workloads (~$0.50/hr on-demand, ~$0.15/hr spot)
+    instance_type: "g4dn.xlarge"
+
+    # Machine image: Ubuntu 22.04 with NVIDIA drivers and CUDA toolkit
+    # Pre-configured with Docker and nvidia-container-runtime
+    machine_image: "ami-ubuntu-22.04-nvidia-cuda-12-1"
+
+    # Use spot instances for cost savings (3x cheaper)
+    # CIRun handles spot interruptions gracefully
+    preemptible: true
+
+    # Labels for GitHub Actions runner selection
+    # Pattern: cirun-gpu-8g--{run_id} for isolation
+    labels:
+      - "cirun-gpu-8g"
+
+    # Runner timeout: 30 minutes (sufficient for GPU tests)
+    # Auto-terminates if job exceeds this duration
+    timeout: 30
+
+    # Disk size: 100 GB (enough for Docker images, dependencies, test artifacts)
+    disk_size: 100
+
+    # Region: us-east-1 (lowest latency from GitHub Actions)
+    region: "us-east-1"
+
+    # Auto-shutdown after 5 minutes of inactivity
+    # Prevents accidental cost overruns
+    idle_timeout: 5
+
+    # Environment setup (executed on runner startup)
+    setup:
+      - name: "Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 curl
+
+      - name: "Verify GPU availability"
+        run: |
+          nvidia-smi
+          echo "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+
+      - name: "Verify CUDA availability"
+        run: |
+          nvcc --version || echo "CUDA toolkit not in PATH (may be available via PyTorch)"
+
+# Resource limits
+# Maximum concurrent GPU runners (prevents cost overruns)
+max_runners: 2
+
+# Auto-cleanup: terminate runners after job completion
+auto_cleanup: true
+
+# Monitoring and logging
+monitoring:
+  enabled: true
+  # Send metrics to CIRun dashboard
+  metrics:
+    - "gpu_utilization"
+    - "gpu_memory_used"
+    - "cpu_utilization"
+    - "disk_usage"
