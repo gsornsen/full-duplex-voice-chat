@@ -234,7 +234,9 @@ jobs:
 
   test:
     name: Test (pytest - selective)
-    runs-on: ubuntu-latest
+    runs-on:
+      - ubuntu-latest
+      - gpu=T4
     needs: detect-changes
     if: needs.detect-changes.outputs.skip_all != 'true'
     steps:
