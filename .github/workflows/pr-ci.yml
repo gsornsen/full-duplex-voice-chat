@@ -1,11 +1,13 @@
 name: PR CI
 
 # Comprehensive CI for pull requests to main
-# - Runs full test suite (all 649 tests)
+# - Runs full test suite (all 730 tests)
 # - Collects code coverage with Codecov
 # - Enforces quality gates (lint, typecheck, tests must pass)
 # - Status is REQUIRED (blocks merge if failing)
 # - Uses aggressive caching for faster runs
+# - GPU tests run in parallel on dedicated runners
+# - Integration tests run with Docker service containers
 
 on:
   pull_request:
@@ -46,49 +48,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      # Use composite action for DRY setup
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Cache protobuf stubs
-        uses: actions/cache@v4
-        with:
-          path: src/rpc/generated
-          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
-
-      - name: Generate protobuf stubs
-        run: |
-          uv run python -m grpc_tools.protoc \
-            -I src/rpc \
-            --python_out=src/rpc/generated \
-            --grpc_python_out=src/rpc/generated \
-            --pyi_out=src/rpc/generated \
-            src/rpc/tts.proto
-
-      - name: Fix protobuf imports
-        run: |
-          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
 
       - name: Run mypy
         run: uv run mypy src/ tests/
 
   test:
-    name: Test (pytest - full suite)
+    name: Test (pytest - CPU suite)
     runs-on: ubuntu-latest
     permissions:
       # Public new comments on PRs and update existing comments created
       # by this job
       pull-requests: write
       contents: write
+
+    # Service containers for integration tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -105,113 +95,220 @@ jobs:
           echo "After cleanup:"
           df -h
 
-      - name: Install OS dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libportaudio2
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      # Use composite action for DRY setup
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
 
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      # Clean pip cache after install to save space
-      - name: Clean pip cache
+      # Clean uv cache after install to save space
+      - name: Clean uv cache
         run: |
           uv cache clean
           echo "After cache clean:"
           df -h
 
-      - name: Cache protobuf stubs
-        uses: actions/cache@v4
-        with:
-          path: src/rpc/generated
-          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
-
-      - name: Generate protobuf stubs
+      # Verify Redis is available
+      - name: Verify Redis connectivity
         run: |
-          uv run python -m grpc_tools.protoc \
-            -I src/rpc \
-            --python_out=src/rpc/generated \
-            --grpc_python_out=src/rpc/generated \
-            --pyi_out=src/rpc/generated \
-            src/rpc/tts.proto
+          echo "Testing Redis connectivity..."
+          redis-cli -h localhost -p 6379 ping
+          echo "Redis is ready!"
 
-      - name: Fix protobuf imports
+      - name: Run pytest with coverage (including integration tests)
         run: |
-          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
-
-      - name: Run pytest with coverage (forked for isolation)
-        run: |
+          # Run all tests EXCEPT GPU and infrastructure tests
+          # Integration tests now included with Redis service container
           uv run pytest tests/ \
             -v \
-            -m "not grpc and not infrastructure and not gpu" \
+            -m "not infrastructure and not gpu" \
             --forked \
             --cov=src \
-            --cov-report=xml \
+            --cov-report=xml:coverage-cpu.xml \
             --cov-report=term \
-            --cov-report=html \
+            --cov-report=html:htmlcov-cpu \
             --tb=short \
-            --junitxml=test-results.xml \
+            --junitxml=test-results-cpu.xml \
             -o junit_family=legacy
         env:
-          GRPC_TESTS_ENABLED: "0"
+          # Redis is available via service container on localhost:6379
+          REDIS_URL: "redis://localhost:6379"
 
       # Clean up test artifacts to free space
       - name: Clean test cache
         if: always()
         run: |
           rm -rf .pytest_cache
-          rm -rf htmlcov
+          rm -rf htmlcov-cpu
           echo "After test cleanup:"
           df -h
 
-      - name: Upload coverage to Codecov
+      - name: Upload CPU coverage to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage.xml
-          flags: pytest
-          name: codecov-pr-ci
+          files: ./coverage-cpu.xml
+          flags: pytest-cpu
+          name: codecov-pr-ci-cpu
           fail_ci_if_error: false
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Upload test results to Codecov
+      - name: Upload CPU test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test-results.xml
-          flags: pytest
-          name: codecov-test-results
+          files: ./test-results-cpu.xml
+          flags: pytest-cpu
+          name: codecov-test-results-cpu
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload test results as artifacts
+      - name: Upload CPU test results as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-pr-ci
+          name: test-results-pr-ci-cpu
           path: |
-            coverage.xml
-            test-results.xml
-            .coverage
+            coverage-cpu.xml
+            test-results-cpu.xml
+          retention-days: 30
+
+  # GPU tests job (runs in parallel with CPU tests)
+  gpu-tests:
+    name: GPU Tests (PyTorch CUDA)
+    # Use CIRun GPU runner with unique label per run for isolation
+    runs-on: "cirun-gpu-8g--${{ github.run_id }}"
+    permissions:
+      pull-requests: write
+      contents: write
+
+    # Service containers for integration tests on GPU runner
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify GPU availability (sanity check)
+      - name: Verify GPU hardware
+        run: |
+          echo "=== GPU Hardware Check ==="
+          nvidia-smi
+          echo ""
+          echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+          echo "Driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader)"
+          echo "CUDA: $(nvidia-smi --query-gpu=cuda_version --format=csv,noheader)"
+          echo ""
+          echo "=== GPU Memory ==="
+          nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader
+
+      # Use composite action for DRY setup (skip OS deps - pre-installed on GPU runner)
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          skip-os-deps: "true"
+
+      # Verify PyTorch CUDA availability
+      - name: Verify PyTorch CUDA
+        run: |
+          uv run python -c "
+          import torch
+          import sys
+
+          print('=== PyTorch Configuration ===')
+          print(f'PyTorch version: {torch.__version__}')
+          print(f'CUDA available: {torch.cuda.is_available()}')
+
+          if torch.cuda.is_available():
+              print(f'CUDA version: {torch.version.cuda}')
+              print(f'cuDNN version: {torch.backends.cudnn.version()}')
+              print(f'GPU count: {torch.cuda.device_count()}')
+              print(f'GPU name: {torch.cuda.get_device_name(0)}')
+              print(f'GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+          else:
+              print('ERROR: CUDA not available in PyTorch!')
+              sys.exit(1)
+          "
+
+      # Verify Redis connectivity
+      - name: Verify Redis connectivity
+        run: |
+          echo "Testing Redis connectivity..."
+          redis-cli -h localhost -p 6379 ping
+          echo "Redis is ready!"
+
+      # Run GPU-specific tests with coverage
+      - name: Run GPU tests with coverage
+        run: |
+          echo "Running GPU-accelerated tests (marked with @pytest.mark.gpu)"
+          uv run pytest tests/ \
+            -v \
+            -m "gpu" \
+            --forked \
+            --cov=src \
+            --cov-report=xml:coverage-gpu.xml \
+            --cov-report=term \
+            --cov-report=html:htmlcov-gpu \
+            --tb=short \
+            --junitxml=test-results-gpu.xml \
+            -o junit_family=legacy
+        env:
+          # Ensure GPU tests run even if CUDA_VISIBLE_DEVICES is set
+          CUDA_VISIBLE_DEVICES: "0"
+          # Redis is available via service container
+          REDIS_URL: "redis://localhost:6379"
+
+      - name: Upload GPU coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage-gpu.xml
+          flags: pytest-gpu
+          name: codecov-pr-ci-gpu
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload GPU test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test-results-gpu.xml
+          flags: pytest-gpu
+          name: codecov-test-results-gpu
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload GPU test results as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-pr-ci-gpu
+          path: |
+            coverage-gpu.xml
+            test-results-gpu.xml
           retention-days: 30
 
   build:
     name: Build Check
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, test, gpu-tests]
     steps:
       - uses: actions/checkout@v4
 
@@ -237,7 +334,8 @@ jobs:
           echo "All quality gates passed:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Linting (ruff)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Type checking (mypy)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Full test suite (pytest)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ CPU test suite (pytest + integration)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GPU test suite (pytest)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Code coverage (codecov)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Build verification (uv lock)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

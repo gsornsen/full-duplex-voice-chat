@@ -7,6 +7,7 @@ name: Feature CI
 # - Provides fast feedback (~3-5 min vs 10-15 min)
 # - Status is informational (non-blocking)
 # - GPU tests run when TTS changes detected
+# - Integration tests run with Docker service containers
 
 on:
   push:
@@ -243,6 +244,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.skip_all != 'true'
+
+    # Service containers for integration tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -252,6 +266,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           uv-version: ${{ env.UV_VERSION }}
+
+      # Verify Redis is available
+      - name: Verify Redis connectivity
+        run: |
+          echo "Testing Redis connectivity..."
+          redis-cli -h localhost -p 6379 ping
+          echo "Redis is ready!"
 
       - name: Run selected tests
         run: |
@@ -290,10 +311,16 @@ jobs:
           fi
 
           echo "Test paths: $TEST_PATHS"
-          # Skip GPU tests on CPU runners (will run on GPU runner)
-          uv run pytest $TEST_PATHS -v -m "not grpc and not infrastructure and not gpu" --tb=short
+          # Skip GPU and infrastructure tests on CPU runners
+          # Integration tests now run with Redis service container
+          uv run pytest $TEST_PATHS \
+            -v \
+            -m "not infrastructure and not gpu" \
+            --forked \
+            --tb=short
         env:
-          GRPC_TESTS_ENABLED: "0"
+          # Redis is available via service container
+          REDIS_URL: "redis://localhost:6379"
 
       - name: Upload test results
         if: always()
@@ -320,6 +347,19 @@ jobs:
       (needs.detect-changes.outputs.run_gpu_tests == 'true' ||
        needs.detect-changes.outputs.run_integration_tests == 'true' ||
        needs.detect-changes.outputs.run_all_tests == 'true')
+
+    # Service containers for integration tests on GPU runner
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -366,6 +406,13 @@ jobs:
               sys.exit(1)
           "
 
+      # Verify Redis connectivity
+      - name: Verify Redis connectivity
+        run: |
+          echo "Testing Redis connectivity..."
+          redis-cli -h localhost -p 6379 ping
+          echo "Redis is ready!"
+
       # Run GPU-specific tests
       - name: Run GPU tests
         run: |
@@ -373,11 +420,14 @@ jobs:
           uv run pytest tests/ \
             -v \
             -m "gpu" \
+            --forked \
             --tb=short \
             --junitxml=test-results-gpu.xml
         env:
           # Ensure GPU tests run even if CUDA_VISIBLE_DEVICES is set
           CUDA_VISIBLE_DEVICES: "0"
+          # Redis is available via service container
+          REDIS_URL: "redis://localhost:6379"
 
       - name: Upload GPU test results
         if: always()
@@ -413,7 +463,7 @@ jobs:
           echo "**Job Results:**" >> $GITHUB_STEP_SUMMARY
           echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Typecheck: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Test (CPU): ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Test (CPU + Integration): ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Test (GPU): ${{ needs.gpu-tests.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 

@@ -60,7 +60,13 @@
       "Bash(awk:*)",
       "Bash(mypy:*)",
       "Bash(gh run view:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(git worktree:*)",
+      "WebFetch(domain:aws.amazon.com)",
+      "WebFetch(domain:www.runpod.io)",
+      "WebFetch(domain:vast.ai)",
+      "WebFetch(domain:opensource.microsoft.com)",
+      "WebFetch(domain:www.nvidia.com)"
     ],
     "deny": [],
     "ask": []
