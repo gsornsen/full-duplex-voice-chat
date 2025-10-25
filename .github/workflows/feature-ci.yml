@@ -6,6 +6,7 @@ name: Feature CI
 # - Runs only on feature branches (not main, not PRs)
 # - Provides fast feedback (~3-5 min vs 10-15 min)
 # - Status is informational (non-blocking)
+# - GPU tests run when TTS changes detected
 
 on:
   push:
@@ -34,9 +35,33 @@ env:
   UV_VERSION: "latest"
 
 jobs:
+  # Skip if this push is associated with an open PR (pr-ci.yml will run instead)
+  check-pr:
+    name: Check if PR exists
+    runs-on: ubuntu-latest
+    outputs:
+      has_pr: ${{ steps.check.outputs.has_pr }}
+    steps:
+      - name: Check for associated PR
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check if current branch has an open PR
+          PR_COUNT=$(gh pr list --head ${{ github.ref_name }} --repo ${{ github.repository }} --json number --jq 'length')
+          if [ "$PR_COUNT" -gt 0 ]; then
+            echo "has_pr=true" >> $GITHUB_OUTPUT
+            echo "Branch has open PR, skipping feature-ci (pr-ci will run)"
+          else
+            echo "has_pr=false" >> $GITHUB_OUTPUT
+            echo "No PR found, running feature-ci"
+          fi
+
   # Determine which test suites to run based on changed files
   detect-changes:
     name: Detect Changes
+    needs: check-pr
+    if: needs.check-pr.outputs.has_pr == 'false'
     runs-on: ubuntu-latest
     outputs:
       run_lint: ${{ steps.changes.outputs.run_lint }}
@@ -46,6 +71,7 @@ jobs:
       run_asr_tests: ${{ steps.changes.outputs.run_asr_tests }}
       run_integration_tests: ${{ steps.changes.outputs.run_integration_tests }}
       run_all_tests: ${{ steps.changes.outputs.run_all_tests }}
+      run_gpu_tests: ${{ steps.changes.outputs.run_gpu_tests }}
       skip_all: ${{ steps.changes.outputs.skip_all }}
     steps:
       - uses: actions/checkout@v4
@@ -91,6 +117,7 @@ jobs:
           RUN_ASR_TESTS="false"
           RUN_INTEGRATION_TESTS="false"
           RUN_ALL_TESTS="false"
+          RUN_GPU_TESTS="false"
 
           # Check for changes that require full test suite
           if echo "$CHANGED_FILES" | grep -qE '^pyproject\.toml$|^uv\.lock$|^\.github/workflows/|^configs/'; then
@@ -100,6 +127,7 @@ jobs:
             RUN_TTS_TESTS="true"
             RUN_ASR_TESTS="true"
             RUN_INTEGRATION_TESTS="true"
+            RUN_GPU_TESTS="true"
           fi
 
           # Check for orchestrator changes
@@ -109,11 +137,12 @@ jobs:
             RUN_INTEGRATION_TESTS="true"
           fi
 
-          # Check for TTS changes
+          # Check for TTS changes (trigger GPU tests)
           if echo "$CHANGED_FILES" | grep -qE '^src/tts/'; then
-            echo "TTS changes detected"
+            echo "TTS changes detected - triggering GPU tests"
             RUN_TTS_TESTS="true"
             RUN_INTEGRATION_TESTS="true"
+            RUN_GPU_TESTS="true"
           fi
 
           # Check for ASR changes
@@ -137,6 +166,7 @@ jobs:
             fi
             if echo "$CHANGED_FILES" | grep -qE '^tests/unit/tts/'; then
               RUN_TTS_TESTS="true"
+              RUN_GPU_TESTS="true"
             fi
             if echo "$CHANGED_FILES" | grep -qE '^tests/unit/asr/'; then
               RUN_ASR_TESTS="true"
@@ -163,6 +193,7 @@ jobs:
           echo "run_asr_tests=$RUN_ASR_TESTS" >> $GITHUB_OUTPUT
           echo "run_integration_tests=$RUN_INTEGRATION_TESTS" >> $GITHUB_OUTPUT
           echo "run_all_tests=$RUN_ALL_TESTS" >> $GITHUB_OUTPUT
+          echo "run_gpu_tests=$RUN_GPU_TESTS" >> $GITHUB_OUTPUT
           echo "skip_all=$SKIP_ALL" >> $GITHUB_OUTPUT
 
   lint:
@@ -197,37 +228,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      # Use composite action for DRY setup
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Cache protobuf stubs
-        uses: actions/cache@v4
-        with:
-          path: src/rpc/generated
-          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
-
-      - name: Generate protobuf stubs
-        run: |
-          uv run python -m grpc_tools.protoc \
-            -I src/rpc \
-            --python_out=src/rpc/generated \
-            --grpc_python_out=src/rpc/generated \
-            --pyi_out=src/rpc/generated \
-            src/rpc/tts.proto
-
-      - name: Fix protobuf imports
-        run: |
-          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
 
       - name: Run mypy
         run: uv run mypy src/ tests/
@@ -240,42 +246,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install OS dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libportaudio2
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      # Use composite action for DRY setup
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Cache protobuf stubs
-        uses: actions/cache@v4
-        with:
-          path: src/rpc/generated
-          key: protobuf-${{ hashFiles('src/rpc/tts.proto') }}
-
-      - name: Generate protobuf stubs
-        run: |
-          uv run python -m grpc_tools.protoc \
-            -I src/rpc \
-            --python_out=src/rpc/generated \
-            --grpc_python_out=src/rpc/generated \
-            --pyi_out=src/rpc/generated \
-            src/rpc/tts.proto
-
-      - name: Fix protobuf imports
-        run: |
-          sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
 
       - name: Run selected tests
         run: |
@@ -314,7 +290,8 @@ jobs:
           fi
 
           echo "Test paths: $TEST_PATHS"
-          uv run pytest $TEST_PATHS -v -m "not grpc and not infrastructure" --tb=short
+          # Skip GPU tests on CPU runners (will run on GPU runner)
+          uv run pytest $TEST_PATHS -v -m "not grpc and not infrastructure and not gpu" --tb=short
         env:
           GRPC_TESTS_ENABLED: "0"
 
@@ -328,11 +305,95 @@ jobs:
             test-results.xml
           retention-days: 7
 
+  # GPU tests job (runs when TTS changes detected or integration tests needed)
+  gpu-tests:
+    name: GPU Tests (PyTorch CUDA)
+    # Use CIRun GPU runner with unique label per run for isolation
+    runs-on: "cirun-gpu-8g--${{ github.run_id }}"
+    needs: detect-changes
+    # Run GPU tests when:
+    # - TTS tests are needed (TTS changes detected)
+    # - Integration tests are needed (may include GPU-accelerated TTS)
+    # - All tests are needed (dependency/config changes)
+    if: |
+      needs.detect-changes.outputs.skip_all != 'true' &&
+      (needs.detect-changes.outputs.run_gpu_tests == 'true' ||
+       needs.detect-changes.outputs.run_integration_tests == 'true' ||
+       needs.detect-changes.outputs.run_all_tests == 'true')
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify GPU availability (sanity check)
+      - name: Verify GPU hardware
+        run: |
+          echo "=== GPU Hardware Check ==="
+          nvidia-smi
+          echo ""
+          echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+          echo "Driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader)"
+          echo "CUDA: $(nvidia-smi --query-gpu=cuda_version --format=csv,noheader)"
+          echo ""
+          echo "=== GPU Memory ==="
+          nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader
+
+      # Use composite action for DRY setup (skip OS deps - pre-installed on GPU runner)
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          skip-os-deps: "true"
+
+      # Verify PyTorch CUDA availability
+      - name: Verify PyTorch CUDA
+        run: |
+          uv run python -c "
+          import torch
+          import sys
+
+          print('=== PyTorch Configuration ===')
+          print(f'PyTorch version: {torch.__version__}')
+          print(f'CUDA available: {torch.cuda.is_available()}')
+
+          if torch.cuda.is_available():
+              print(f'CUDA version: {torch.version.cuda}')
+              print(f'cuDNN version: {torch.backends.cudnn.version()}')
+              print(f'GPU count: {torch.cuda.device_count()}')
+              print(f'GPU name: {torch.cuda.get_device_name(0)}')
+              print(f'GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+          else:
+              print('ERROR: CUDA not available in PyTorch!')
+              sys.exit(1)
+          "
+
+      # Run GPU-specific tests
+      - name: Run GPU tests
+        run: |
+          echo "Running GPU-accelerated tests (marked with @pytest.mark.gpu)"
+          uv run pytest tests/ \
+            -v \
+            -m "gpu" \
+            --tb=short \
+            --junitxml=test-results-gpu.xml
+        env:
+          # Ensure GPU tests run even if CUDA_VISIBLE_DEVICES is set
+          CUDA_VISIBLE_DEVICES: "0"
+
+      - name: Upload GPU test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-gpu-feature-ci
+          path: |
+            test-results-gpu.xml
+            .pytest_cache/
+          retention-days: 7
+
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [detect-changes, lint, typecheck, test]
-    if: always()
+    needs: [check-pr, detect-changes, lint, typecheck, test, gpu-tests]
+    if: always() && needs.check-pr.outputs.has_pr == 'false'
     steps:
       - name: Check results
         run: |
@@ -347,17 +408,20 @@ jobs:
           echo "- Run ASR Tests: ${{ needs.detect-changes.outputs.run_asr_tests }}" >> $GITHUB_STEP_SUMMARY
           echo "- Run Integration Tests: ${{ needs.detect-changes.outputs.run_integration_tests }}" >> $GITHUB_STEP_SUMMARY
           echo "- Run All Tests: ${{ needs.detect-changes.outputs.run_all_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run GPU Tests: ${{ needs.detect-changes.outputs.run_gpu_tests }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Job Results:**" >> $GITHUB_STEP_SUMMARY
           echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Typecheck: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Test: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Test (CPU): ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Test (GPU): ${{ needs.gpu-tests.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Check if any job failed
           if [ "${{ needs.lint.result }}" == "failure" ] || \
              [ "${{ needs.typecheck.result }}" == "failure" ] || \
-             [ "${{ needs.test.result }}" == "failure" ]; then
+             [ "${{ needs.test.result }}" == "failure" ] || \
+             [ "${{ needs.gpu-tests.result }}" == "failure" ]; then
             echo "❌ **Status: FAILED** - Some checks did not pass" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Note: Feature CI failures are informational only and do not block pushes." >> $GITHUB_STEP_SUMMARY
