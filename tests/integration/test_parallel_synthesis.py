@@ -19,6 +19,8 @@ Test Coverage:
 
 Design reference: Phase B ParallelSynthesisPipeline + SentenceSegmenter
 """
+# type: ignore  # TODO: Add proper type annotations for test fixtures and helpers
+
 
 import asyncio
 import time

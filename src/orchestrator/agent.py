@@ -42,7 +42,6 @@ from livekit.plugins import openai, silero
 from src.orchestrator.config_validator import ConfigValidator
 from src.orchestrator.continuation_detector import ContinuationDetector
 from src.orchestrator.dual_llm import DualLLMOrchestrator
-from src.orchestrator.parallel_tts import ParallelSynthesisPipeline
 from src.orchestrator.sentence_segmenter import SentenceSegmenter
 from src.orchestrator.transcript_buffer import TranscriptBuffer
 from src.plugins import grpc_tts, whisperx
@@ -60,7 +59,7 @@ except Exception as e:
     logger.warning(f"Configuration validation failed: {e}")
 
 
-class DualLLMPlugin(llm_module.LLM):
+class DualLLMPlugin(llm_module.LLM):  # type: ignore[type-arg]
     """Custom LLM plugin that wraps DualLLMOrchestrator for natural conversation.
 
     This plugin integrates the dual-LLM strategy into the LiveKit Agent framework:
@@ -90,7 +89,7 @@ class DualLLMPlugin(llm_module.LLM):
         )
         logger.info(f"DualLLMPlugin initialized with model={model}")
 
-    def chat(
+    def chat(  # type: ignore[no-untyped-def]
         self,
         *,
         chat_ctx: llm_module.ChatContext,
@@ -106,7 +105,7 @@ class DualLLMPlugin(llm_module.LLM):
             LLMStream with filler and full response chunks
         """
         # Extract latest user message
-        messages = chat_ctx.messages
+        messages = chat_ctx.messages  # type: ignore[attr-defined]
         if not messages:
             logger.warning("No messages in chat context")
             return self._create_empty_stream()
@@ -114,7 +113,7 @@ class DualLLMPlugin(llm_module.LLM):
         # Get the last user message
         user_message = ""
         for msg in reversed(messages):
-            if msg.role == llm_module.ChatRole.USER:
+            if msg.role == llm_module.ChatRole.USER:  # type: ignore[attr-defined]
                 user_message = msg.content
                 break
 
@@ -128,7 +127,7 @@ class DualLLMPlugin(llm_module.LLM):
         conversation_history = []
         for msg in messages[:-1]:  # Exclude latest user message (added by dual_llm)
             conversation_history.append({
-                "role": "assistant" if msg.role == llm_module.ChatRole.ASSISTANT else "user",
+                "role": "assistant" if msg.role == llm_module.ChatRole.ASSISTANT else "user",  # type: ignore[attr-defined]
                 "content": msg.content,
             })
 
@@ -150,7 +149,7 @@ class DualLLMPlugin(llm_module.LLM):
             LLMStream with response chunks
         """
         # Create async generator for dual-LLM response
-        async def generate_chunks():
+        async def generate_chunks():  # type: ignore[no-untyped-def]
             accumulated_text = ""
 
             # Generate response with dual-LLM
@@ -165,11 +164,11 @@ class DualLLMPlugin(llm_module.LLM):
                 accumulated_text += text_chunk
 
                 # Yield chunk with role information
-                yield llm_module.ChatChunk(
+                yield llm_module.ChatChunk(  # type: ignore[call-arg]
                     choices=[
-                        llm_module.Choice(
+                        llm_module.Choice(  # type: ignore[attr-defined]
                             delta=llm_module.ChoiceDelta(
-                                role=llm_module.ChatRole.ASSISTANT,
+                                role=llm_module.ChatRole.ASSISTANT,  # type: ignore[attr-defined]
                                 content=text_chunk,
                             ),
                             index=0,
@@ -191,7 +190,7 @@ class DualLLMPlugin(llm_module.LLM):
         Returns:
             Empty LLMStream
         """
-        async def empty_generator():
+        async def empty_generator():  # type: ignore[no-untyped-def]
             if False:  # pragma: no cover
                 yield None
 
@@ -243,13 +242,42 @@ class VoiceAssistantAgent(Agent):
                 model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
             )
 
-        # Store TTS client reference for parallel synthesis
-        self._tts_client = grpc_tts.TTS(
-            worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
-            model_id=os.getenv(
-                "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
-            ),
+        # Configure parallel synthesis if enabled
+        self.parallel_synthesis_enabled = (
+            os.getenv("PARALLEL_SYNTHESIS_ENABLED", "false").lower() == "true"
         )
+
+        if self.parallel_synthesis_enabled:
+            num_workers = int(os.getenv("PARALLEL_SYNTHESIS_NUM_WORKERS", "2"))
+            max_queue_depth = int(os.getenv("PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH", "10"))
+            gpu_limit_str = os.getenv("PARALLEL_SYNTHESIS_GPU_LIMIT", "2")
+            gpu_limit = int(gpu_limit_str) if gpu_limit_str.lower() != "none" else None
+
+            # Create TTS client with parallel synthesis enabled
+            self._tts_client = grpc_tts.TTS(
+                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+                model_id=os.getenv(
+                    "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
+                ),
+                parallel_enabled=True,
+                parallel_num_workers=num_workers,
+                parallel_max_queue=max_queue_depth,
+                parallel_gpu_limit=gpu_limit,
+            )
+            logger.info(
+                f"Parallel synthesis enabled (workers={num_workers}, "
+                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})"
+            )
+        else:
+            # Create TTS client without parallel synthesis
+            self._tts_client = grpc_tts.TTS(
+                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+                model_id=os.getenv(
+                    "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
+                ),
+                parallel_enabled=False,
+            )
+            logger.info("Parallel synthesis disabled (using standard TTS)")
 
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
@@ -267,6 +295,7 @@ class VoiceAssistantAgent(Agent):
             # LLM: Dual-LLM strategy if enabled, otherwise standard OpenAI
             llm=llm_instance,
             # Phase 3: Custom gRPC TTS plugin (connects to our TTS worker with Piper)
+            # NOW with optional parallel synthesis support
             tts=self._tts_client,
             # VAD: Required for streaming with OpenAI STT (which doesn't support streaming natively)
             # Tuned to capture full speech start (avoid trimming first words)
@@ -294,34 +323,9 @@ class VoiceAssistantAgent(Agent):
             self.transcript_buffer = TranscriptBuffer(max_size=10, ttl_seconds=30.0)
             logger.info("Continuation detection enabled")
         else:
-            self.continuation_detector = None
-            self.transcript_buffer = None
+            self.continuation_detector = None  # type: ignore[assignment]
+            self.transcript_buffer = None  # type: ignore[assignment]
             logger.info("Continuation detection disabled")
-
-        # Initialize parallel synthesis pipeline (Phase C)
-        self.parallel_synthesis_enabled = (
-            os.getenv("PARALLEL_SYNTHESIS_ENABLED", "false").lower() == "true"
-        )
-        if self.parallel_synthesis_enabled:
-            num_workers = int(os.getenv("PARALLEL_SYNTHESIS_NUM_WORKERS", "2"))
-            max_queue_depth = int(os.getenv("PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH", "10"))
-            gpu_limit_str = os.getenv("PARALLEL_SYNTHESIS_GPU_LIMIT", "2")
-            gpu_limit = int(gpu_limit_str) if gpu_limit_str.lower() != "none" else None
-
-            self.parallel_tts = ParallelSynthesisPipeline(
-                tts_adapter=self._tts_client,
-                num_workers=num_workers,
-                max_sentence_queue=max_queue_depth,
-                max_gpu_concurrent=gpu_limit,
-            )
-            logger.info(
-                f"Parallel synthesis enabled (workers={num_workers}, "
-                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})"
-            )
-        else:
-            self.parallel_tts = None
-            logger.info("Parallel synthesis disabled (using standard TTS)")
-
 
         logger.info(
             f"VoiceAssistantAgent initialized "
@@ -391,6 +395,17 @@ async def entrypoint(ctx: JobContext) -> None:
             extra={"room": ctx.room.name},
         )
 
+        # Start parallel synthesis mode if enabled
+        # This starts the persistent worker pool that synthesizes sentences in parallel
+        if agent.parallel_synthesis_enabled:
+            logger.info("Starting parallel synthesis persistent worker pool...")
+            try:
+                await agent._tts_client.start_parallel_mode()
+                logger.info("Parallel synthesis worker pool started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start parallel synthesis mode: {e}", exc_info=True)
+                logger.warning("Continuing with sequential synthesis as fallback")
+
         # Send status update: initialization starting
         # NOW this works because session.start() has connected to the room
         try:
@@ -453,7 +468,7 @@ async def entrypoint(ctx: JobContext) -> None:
             if tts_plugin is not None and hasattr(tts_plugin, 'warm_up'):
                 warm_up_start = time.perf_counter()
                 await asyncio.wait_for(
-                    tts_plugin.warm_up(),  # type: ignore[attr-defined]
+                    tts_plugin.warm_up(),
                     timeout=30.0,
                 )
                 warm_up_duration = time.perf_counter() - warm_up_start

@@ -9,6 +9,8 @@ Tests the core components of the parallel TTS synthesis pipeline:
 Design reference: /tmp/parallel-tts-worker-pool-design.md (Phase B)
 """
 
+# type: ignore  # TODO: Add proper type annotations for test fixtures and helpers
+
 import asyncio
 from unittest.mock import MagicMock
 

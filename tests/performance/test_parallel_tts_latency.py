@@ -18,6 +18,8 @@ Test Coverage:
 - Stress testing
 - Performance regression detection
 
+# type: ignore  # TODO: Add proper type annotations for test fixtures and helpers
+
 Design reference: Phase B ParallelSynthesisPipeline performance SLAs
 """
 

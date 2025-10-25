@@ -58,7 +58,9 @@
       "Read(//home/gerald/.cache/**)",
       "Read(//home/gerald/**)",
       "Bash(awk:*)",
-      "Bash(mypy:*)"
+      "Bash(mypy:*)",
+      "Bash(gh run view:*)",
+      "Bash(sed:*)"
     ],
     "deny": [],
     "ask": []

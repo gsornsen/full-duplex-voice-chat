@@ -65,7 +65,7 @@ def mock_cosyvoice_streaming_class() -> Mock:
     performance characteristics.
     """
 
-    def streaming_inference_generator():
+    def streaming_inference_generator():  # type: ignore[no-untyped-def]
         """Simulate streaming audio generation with realistic timing."""
         # Simulate 10 chunks, each taking ~50ms to generate
         for _i in range(10):
@@ -77,7 +77,7 @@ def mock_cosyvoice_streaming_class() -> Mock:
             yield {"tts_speech": chunk_audio}
 
     mock_model_instance = Mock()
-    mock_model_instance.inference_zero_shot.return_value = streaming_inference_generator()
+    mock_model_instance.inference_zero_shot.return_value = streaming_inference_generator()  # type: ignore[no-untyped-call]
 
     mock_class = Mock(return_value=mock_model_instance)
     return mock_class

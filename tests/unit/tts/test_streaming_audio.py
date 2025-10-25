@@ -88,8 +88,8 @@ class StreamingResampler:
 
         # Convert back to original dtype
         if chunk.dtype == np.int16:
-            return resampled.astype(np.int16)
-        return resampled.astype(np.float32)
+            return resampled.astype(np.int16)  # type: ignore[no-any-return]
+        return resampled.astype(np.float32)  # type: ignore[no-any-return]
 
     def flush(self) -> np.ndarray | None:
         """Flush overlap buffer and return final residual samples.

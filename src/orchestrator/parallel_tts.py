@@ -387,8 +387,13 @@ class TTSWorker:
         # Call TTS adapter (LiveKit ChunkedStream pattern)
         stream = self.tts_adapter.synthesize(text)
 
-        # Collect all chunks into bytes
-        audio_bytes = await stream.collect()
+        # Collect all chunks
+        # Note: LiveKit's collect() returns rtc.AudioFrame, not bytes
+        audio_frame: Any = await stream.collect()  # rtc.AudioFrame (avoid import)
+
+        # Extract raw PCM bytes from AudioFrame
+        # AudioFrame.data is a memoryview/buffer containing raw PCM data
+        audio_bytes: bytes = bytes(audio_frame.data)
 
         return audio_bytes
 
