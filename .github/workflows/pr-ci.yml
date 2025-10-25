@@ -83,9 +83,7 @@ jobs:
 
   test:
     name: Test (pytest - full suite)
-    runs-on:
-      - ubuntu-latest
-      - gpu=T4
+    runs-on: ubuntu-latest
     permissions:
       # Public new comments on PRs and update existing comments created
       # by this job
