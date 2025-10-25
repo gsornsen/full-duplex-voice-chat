@@ -92,6 +92,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free up disk space before installation
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          echo "After cleanup:"
+          df -h
+
       - name: Install OS dependencies
         run: |
           sudo apt-get update
@@ -109,6 +122,13 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras
+
+      # Clean pip cache after install to save space
+      - name: Clean pip cache
+        run: |
+          uv cache clean
+          echo "After cache clean:"
+          df -h
 
       - name: Cache protobuf stubs
         uses: actions/cache@v4
@@ -129,11 +149,12 @@ jobs:
         run: |
           sed -i 's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' src/rpc/generated/tts_pb2_grpc.py
 
-      - name: Run pytest with coverage
+      - name: Run pytest with coverage (forked for isolation)
         run: |
           uv run pytest tests/ \
             -v \
             -m "not grpc and not infrastructure" \
+            --forked \
             --cov=src \
             --cov-report=xml \
             --cov-report=term \
@@ -143,6 +164,15 @@ jobs:
             -o junit_family=legacy
         env:
           GRPC_TESTS_ENABLED: "0"
+
+      # Clean up test artifacts to free space
+      - name: Clean test cache
+        if: always()
+        run: |
+          rm -rf .pytest_cache
+          rm -rf htmlcov
+          echo "After test cleanup:"
+          df -h
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
@@ -174,9 +204,7 @@ jobs:
           name: test-results-pr-ci
           path: |
             coverage.xml
-            htmlcov/
             test-results.xml
-            .pytest_cache/
             .coverage
           retention-days: 30
 
