@@ -1,32 +1,32 @@
 # CIRun Configuration for GPU CI
-# Provides on-demand GPU runners for testing GPU-accelerated features
+# Using us-west-2 and us-east-1 (IAM permissions verified)
 # Documentation: https://docs.cirun.io/reference/configuration
 
 version: "1.0"
 
 # Dual-region GPU runner configuration
-# Primary: g5g.xlarge (eu-south-2) - cheapest at ~$0.17/hr spot
-# Fallback: g4dn.xlarge (us-west-2) - x86 compatibility at ~$0.23/hr spot
+# Primary: g4dn.xlarge in us-west-2 (Oregon)
+# Fallback: g4dn.xlarge in us-east-1 (Virginia)
 runners:
-  # PRIMARY: g5g.xlarge in eu-south-2 (Milan, Italy)
-  # - NVIDIA T4G GPU (16 GB VRAM) on ARM Graviton2
-  # - Cheapest spot option ~$0.17/hr
-  # - Good for TTS inference (PyTorch ARM support)
-  - name: "gpu-tests-eu"
+  # PRIMARY: g4dn.xlarge in us-west-2 (Oregon)
+  # - NVIDIA T4 GPU (16 GB VRAM)
+  # - Spot price ~$0.23/hr
+  # - Good availability and stable pricing
+  - name: "gpu-tests-us-west"
     cloud: "aws"
-    region: "eu-south-2"
-    instance_type: "g5g.xlarge"
+    region: "us-west-2"
+    instance_type: "g4dn.xlarge"
 
     # GPU configuration
-    gpu: "nvidia-tesla-t4g"
+    gpu: "nvidia-tesla-t4"
 
     # Use spot instances for cost savings
     preemptible: true
 
     # Labels for GitHub Actions runner selection
     labels:
-      - "cirun-gpu-g5g-eu"
-      - "cirun-gpu-8g"  # Generic label (primary matches first)
+      - "cirun-gpu-8g"
+      - "cirun-gpu-us-west"
 
     # Runner timeout: 30 minutes
     timeout: 30
@@ -56,13 +56,13 @@ runners:
         run: |
           nvcc --version || echo "CUDA toolkit not in PATH (may be available via PyTorch)"
 
-  # FALLBACK: g4dn.xlarge in us-west-2 (Oregon)
-  # - NVIDIA T4 GPU (16 GB VRAM) on x86-64
-  # - More expensive but better x86 compatibility
-  # - Spot price ~$0.23/hr
-  - name: "gpu-tests-us"
+  # FALLBACK: g4dn.xlarge in us-east-1 (Virginia)
+  # - NVIDIA T4 GPU (16 GB VRAM)
+  # - Spot price ~$0.16/hr (slightly cheaper)
+  # - Used if us-west-2 quota exhausted
+  - name: "gpu-tests-us-east"
     cloud: "aws"
-    region: "us-west-2"
+    region: "us-east-1"
     instance_type: "g4dn.xlarge"
 
     # GPU configuration
@@ -73,8 +73,8 @@ runners:
 
     # Labels for GitHub Actions runner selection
     labels:
-      - "cirun-gpu-g4dn-us"
       - "cirun-gpu-8g-fallback"
+      - "cirun-gpu-us-east"
 
     # Runner timeout: 30 minutes
     timeout: 30
