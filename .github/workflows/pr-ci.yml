@@ -110,11 +110,6 @@ jobs:
           df -h
 
       # Verify Redis is available
-      - name: Verify Redis connectivity
-        run: |
-          echo "Testing Redis connectivity..."
-          redis-cli -h localhost -p 6379 ping
-          echo "Redis is ready!"
 
       - name: Run pytest with coverage (including integration tests)
         run: |
@@ -244,12 +239,6 @@ jobs:
               sys.exit(1)
           "
 
-      # Verify Redis connectivity
-      - name: Verify Redis connectivity
-        run: |
-          echo "Testing Redis connectivity..."
-          redis-cli -h localhost -p 6379 ping
-          echo "Redis is ready!"
 
       # Run GPU-specific tests with coverage
       - name: Run GPU tests with coverage
