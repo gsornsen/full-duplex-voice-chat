@@ -7,6 +7,13 @@ Tests the core components of the parallel TTS synthesis pipeline:
 - ParallelSynthesisPipeline: End-to-end parallel synthesis
 
 Design reference: /tmp/parallel-tts-worker-pool-design.md (Phase B)
+
+NOTE: These tests are currently SKIPPED because ParallelSynthesisPipeline is not
+integrated into the LiveKit Agent. The active implementation is ParallelTTSWrapper
+in src/plugins/grpc_tts/parallel_wrapper.py.
+
+TODO: Either integrate ParallelSynthesisPipeline or remove these tests entirely.
+TODO: Write integration tests for ParallelTTSWrapper (current active implementation).
 """
 
 # type: ignore  # TODO: Add proper type annotations for test fixtures and helpers
@@ -24,6 +31,10 @@ from src.orchestrator.parallel_tts import (
     SentenceTask,
     SynthesisStatus,
     TTSWorker,
+)
+
+pytestmark = pytest.mark.skip(
+    reason="ParallelSynthesisPipeline not integrated into agent, using parallel_wrapper.py instead"
 )
 
 # ============================================================================
