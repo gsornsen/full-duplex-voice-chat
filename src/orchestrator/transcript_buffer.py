@@ -24,6 +24,7 @@ Typical usage:
         process_transcript("hello world")
 """
 
+import re
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -43,6 +44,24 @@ class TranscriptEntry:
     timestamp: float
     is_complete: bool
     confidence: float
+
+
+def _normalize_text(text: str) -> str:
+    """Normalize text for comparison.
+
+    Args:
+        text: Input text to normalize.
+
+    Returns:
+        Normalized text (lowercase, single spaces).
+    """
+    # Convert to lowercase for case-insensitive comparison
+    text = text.lower()
+    # Normalize whitespace: collapse multiple spaces to single space
+    text = re.sub(r'\s+', ' ', text)
+    # Strip leading/trailing whitespace
+    text = text.strip()
+    return text
 
 
 class TranscriptBuffer:
@@ -81,7 +100,7 @@ class TranscriptBuffer:
 
         This method performs the following operations:
         1. Clean expired entries (TTL-based)
-        2. Check for exact duplicates
+        2. Check for exact duplicates (case-insensitive, whitespace-normalized)
         3. Check for prefix/suffix continuations
         4. Merge if continuation detected
         5. Add new entry to buffer
@@ -111,28 +130,35 @@ class TranscriptBuffer:
 
         current_time = time.time()
 
+        # Normalize for comparison
+        text_normalized = _normalize_text(text)
+
         # Check for duplicates and continuations
         for i, entry in enumerate(reversed(self.buffer)):
             # Only check recent entries (within TTL)
             if current_time - entry.timestamp > self.ttl:
                 break
 
-            # Exact duplicate - return original
-            if entry.text == text:
+            # Normalize entry text for comparison
+            entry_normalized = _normalize_text(entry.text)
+
+            # Exact duplicate (case-insensitive, whitespace-normalized) - return original
+            if entry_normalized == text_normalized:
                 # Update timestamp and confidence if better
                 if confidence > entry.confidence:
                     entry.confidence = confidence
                     entry.timestamp = current_time
                     entry.is_complete = is_complete
+                # Return the ORIGINAL text from buffer (preserves case/whitespace)
                 return entry.text
 
             # Prefix match - continuation detected
-            if text.startswith(entry.text):
+            if text_normalized.startswith(entry_normalized):
                 # Extract the continuation part
-                continuation = text[len(entry.text):].strip()
+                continuation = text_normalized[len(entry_normalized):].strip()
                 if continuation:
                     # Merge and update entry
-                    merged_text = text
+                    merged_text = text  # Use new text (has more content)
                     # Remove old entry and add updated one
                     actual_index = len(self.buffer) - 1 - i
                     del self.buffer[actual_index]
@@ -144,11 +170,11 @@ class TranscriptBuffer:
                     ))
                     return merged_text
                 else:
-                    # Same text with whitespace difference
+                    # Same text with whitespace difference - return original
                     return entry.text
 
             # Suffix match - previous was partial
-            if entry.text.startswith(text) and not entry.is_complete:
+            if entry_normalized.startswith(text_normalized) and not entry.is_complete:
                 # Current text is a prefix of previous partial - likely backtrack
                 # Keep the longer (more complete) version
                 if confidence >= entry.confidence:

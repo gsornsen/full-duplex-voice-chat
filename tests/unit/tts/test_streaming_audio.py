@@ -73,6 +73,10 @@ class StreamingResampler:
         Returns:
             Resampled chunk at target sample rate (same dtype as input)
         """
+        # Handle empty chunks gracefully
+        if len(chunk) == 0:
+            return chunk  # Return empty array with same dtype
+
         # PLACEHOLDER: Actual implementation should use proper resampling
         # with overlap/add to avoid boundary artifacts
         from scipy import signal
@@ -82,6 +86,13 @@ class StreamingResampler:
 
         # Calculate target length
         num_samples = int(len(chunk_float) * self.target_rate / self.source_rate)
+
+        # Handle edge case where calculated num_samples is 0
+        if num_samples == 0:
+            # Return empty array with correct dtype
+            if chunk.dtype == np.int16:
+                return np.array([], dtype=np.int16)
+            return np.array([], dtype=np.float32)
 
         # Resample using scipy
         resampled = signal.resample(chunk_float, num_samples)
