@@ -19,6 +19,9 @@ Test Coverage:
 - Concurrent sessions (sequential behavior)
 - Error handling (missing models, synthesis failures)
 - GPU memory management (telemetry, cleanup)
+
+NOTE: These tests are marked as 'infrastructure' to skip in CI by default.
+They can be run locally with: pytest -m infrastructure
 """
 
 import asyncio
@@ -34,6 +37,9 @@ import torch
 
 from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
 from src.tts.tts_base import AdapterState
+
+# Mark all tests in this module as infrastructure tests (skip in CI)
+pytestmark = pytest.mark.infrastructure
 
 
 @pytest.fixture
