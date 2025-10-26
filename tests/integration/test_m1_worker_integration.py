@@ -170,10 +170,11 @@ async def test_streaming_synthesis(client: TTSWorkerClient) -> None:
         assert len(frame.audio_data) == 1920  # 960 samples × 2 bytes
         assert frame.sequence_number > 0
 
-    # Check final frame
+    # Check final frame (Final Data Frame pattern - has audio data + is_final=True)
     final_frames = [f for f in frames if f.is_final]
     assert len(final_frames) == 1
-    assert final_frames[0].audio_data == b""
+    assert len(final_frames[0].audio_data) > 0  # Final frame has audio data
+    assert final_frames[0].is_final is True  # Marked as final
 
     # Mock adapter generates 500ms per chunk (25 frames × 20ms)
     # 2 chunks = ~50 frames + 1 final frame

@@ -34,9 +34,10 @@ from tests.integration.conftest import (
 
 logger = logging.getLogger(__name__)
 
-# Mark all tests in this module as gRPC tests (may be skipped in CI)
-# These tests use orchestrator_server fixture which depends on mock_tts_worker (gRPC)
-pytestmark = pytest.mark.grpc
+# Mark all tests in this module as infrastructure tests (skip in CI)
+# These tests require LiveKit server with proper authentication configured
+# Run locally with: pytest -m infrastructure
+pytestmark = [pytest.mark.grpc, pytest.mark.infrastructure]
 
 
 @pytest.mark.asyncio

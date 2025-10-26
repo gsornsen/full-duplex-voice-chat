@@ -266,127 +266,27 @@ jobs:
             test-results-integration.xml
           retention-days: 30
 
-  # Batch 3: GPU tests (runs in parallel, dedicated runner, ~4GB RAM)
-  gpu-tests:
-    name: Test (GPU - Batch 3/3)
-    # Use CIRun GPU runner with unique label per run for isolation
-    runs-on: "cirun-gpu-8g--${{ github.run_id }}"
-    permissions:
-      pull-requests: write
-      contents: write
-
-    # Service containers for integration tests on GPU runner
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # Verify GPU availability (sanity check)
-      - name: Verify GPU hardware
-        run: |
-          echo "=== GPU Hardware Check ==="
-          nvidia-smi
-          echo ""
-          echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
-          echo "Driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader)"
-          echo "CUDA: $(nvidia-smi --query-gpu=cuda_version --format=csv,noheader)"
-          echo ""
-          echo "=== GPU Memory ==="
-          nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader
-
-      # Use composite action for DRY setup (skip OS deps - pre-installed on GPU runner)
-      - name: Setup test environment
-        uses: ./.github/actions/setup-test-env
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          uv-version: ${{ env.UV_VERSION }}
-          skip-os-deps: "true"
-
-      # Verify PyTorch CUDA availability
-      - name: Verify PyTorch CUDA
-        run: |
-          uv run python -c "
-          import torch
-          import sys
-
-          print('=== PyTorch Configuration ===')
-          print(f'PyTorch version: {torch.__version__}')
-          print(f'CUDA available: {torch.cuda.is_available()}')
-
-          if torch.cuda.is_available():
-              print(f'CUDA version: {torch.version.cuda}')
-              print(f'cuDNN version: {torch.backends.cudnn.version()}')
-              print(f'GPU count: {torch.cuda.device_count()}')
-              print(f'GPU name: {torch.cuda.get_device_name(0)}')
-              print(f'GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
-          else:
-              print('ERROR: CUDA not available in PyTorch!')
-              sys.exit(1)
-          "
-
-
-      # Run GPU-specific tests with coverage
-      - name: Run GPU tests with coverage
-        run: |
-          echo "=== Batch 3: GPU Tests (~20 tests) ==="
-          uv run pytest tests/ \
-            -v \
-            -m "gpu" \
-            \
-            --cov=src \
-            --cov-report=xml:coverage-gpu.xml \
-            --cov-report=term \
-            --cov-report=html:htmlcov-gpu \
-            --tb=short \
-            --junitxml=test-results-gpu.xml \
-            -o junit_family=legacy
-        env:
-          # Ensure GPU tests run even if CUDA_VISIBLE_DEVICES is set
-          CUDA_VISIBLE_DEVICES: "0"
-          # Redis is available via service container
-          REDIS_URL: "redis://localhost:6379"
-
-      - name: Upload GPU coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage-gpu.xml
-          flags: pytest-gpu
-          name: codecov-pr-ci-gpu
-          fail_ci_if_error: false
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload GPU test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test-results-gpu.xml
-          flags: pytest-gpu
-          name: codecov-test-results-gpu
-          fail_ci_if_error: false
-          verbose: true
-
-      - name: Upload GPU test results as artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-pr-ci-gpu
-          path: |
-            coverage-gpu.xml
-            test-results-gpu.xml
-          retention-days: 30
+  # Batch 3: GPU tests (DISABLED - CIRun provisioning issues)
+  # GPU tests can be run locally with: pytest -m gpu
+  # See .cirun.yml for GPU runner configuration
+  # TODO: Re-enable when CIRun is configured or self-hosted runner available
+  #
+  # gpu-tests:
+  #   name: Test (GPU - Batch 3/3)
+  #   runs-on: "cirun-gpu-8g--${{ github.run_id }}"
+  #   permissions:
+  #     pull-requests: write
+  #     contents: write
+  #   services:
+  #     redis:
+  #       image: redis:7-alpine
+  #       ports:
+  #         - 6379:6379
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Run GPU tests
+  #       run: pytest -m gpu
+  # (Full job definition commented out - see git history for details)
 
   build:
     name: Build Check

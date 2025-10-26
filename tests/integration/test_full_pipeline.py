@@ -36,8 +36,10 @@ from tests.integration.test_utils import skip_if_grpc_unsafe
 
 logger = logging.getLogger(__name__)
 
-# Mark all tests in this module as gRPC tests (may be skipped in CI)
-pytestmark = pytest.mark.grpc
+# Mark all tests in this module as infrastructure tests (skip in CI)
+# These tests require LiveKit server with proper authentication configured
+# Run locally with: pytest -m infrastructure
+pytestmark = [pytest.mark.grpc, pytest.mark.infrastructure]
 
 
 @pytest.mark.integration
