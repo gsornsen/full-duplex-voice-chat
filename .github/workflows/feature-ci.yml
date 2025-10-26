@@ -316,7 +316,7 @@ jobs:
           uv run pytest $TEST_PATHS \
             -v \
             -m "not infrastructure and not gpu" \
-            --forked \
+            \
             --tb=short
         env:
           # Redis is available via service container
@@ -420,7 +420,7 @@ jobs:
           uv run pytest tests/ \
             -v \
             -m "gpu" \
-            --forked \
+            \
             --tb=short \
             --junitxml=test-results-gpu.xml
         env:

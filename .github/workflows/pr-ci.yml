@@ -118,7 +118,7 @@ jobs:
           uv run pytest tests/ \
             -v \
             -m "not infrastructure and not gpu" \
-            --forked \
+            \
             --cov=src \
             --cov-report=xml:coverage-cpu.xml \
             --cov-report=term \
@@ -247,7 +247,7 @@ jobs:
           uv run pytest tests/ \
             -v \
             -m "gpu" \
-            --forked \
+            \
             --cov=src \
             --cov-report=xml:coverage-gpu.xml \
             --cov-report=term \
