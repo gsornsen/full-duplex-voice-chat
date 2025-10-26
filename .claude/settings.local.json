@@ -66,7 +66,8 @@
       "WebFetch(domain:www.runpod.io)",
       "WebFetch(domain:vast.ai)",
       "WebFetch(domain:opensource.microsoft.com)",
-      "WebFetch(domain:www.nvidia.com)"
+      "WebFetch(domain:www.nvidia.com)",
+      "Bash(gh pr checks:*)"
     ],
     "deny": [],
     "ask": []

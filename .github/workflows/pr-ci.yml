@@ -1,13 +1,14 @@
 name: PR CI
 
 # Comprehensive CI for pull requests to main
-# - Runs full test suite (all 730 tests)
+# - Runs full test suite in batches to avoid OOM (GitHub Actions runners have 7GB RAM)
+# - Batch 1: Unit tests (~907 tests, ~2GB RAM, fast)
+# - Batch 2: Integration tests (~208 tests, ~3GB RAM, needs Redis)
+# - Batch 3: GPU tests (~20 tests, ~4GB RAM, dedicated runner)
 # - Collects code coverage with Codecov
 # - Enforces quality gates (lint, typecheck, tests must pass)
 # - Status is REQUIRED (blocks merge if failing)
 # - Uses aggressive caching for faster runs
-# - GPU tests run in parallel on dedicated runners
-# - Integration tests run with Docker service containers
 
 on:
   pull_request:
@@ -58,12 +59,107 @@ jobs:
       - name: Run mypy
         run: uv run mypy src/ tests/
 
-  test:
-    name: Test (pytest - CPU suite)
+  # Batch 1: Unit tests only (fast, no external dependencies, ~2GB RAM)
+  test-unit:
+    name: Test (Unit - Batch 1/3)
     runs-on: ubuntu-latest
     permissions:
-      # Public new comments on PRs and update existing comments created
-      # by this job
+      pull-requests: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Free up disk space before installation
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          echo "After cleanup:"
+          df -h
+
+      # Use composite action for DRY setup
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-env
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+
+      # Clean uv cache after install to save space
+      - name: Clean uv cache
+        run: |
+          uv cache clean
+          echo "After cache clean:"
+          df -h
+
+      # Run unit tests only (fast, no Docker/Redis needed)
+      - name: Run unit tests with coverage
+        timeout-minutes: 20
+        run: |
+          echo "=== Batch 1: Unit Tests (~907 tests) ==="
+          uv run pytest tests/unit/ \
+            -v \
+            -m "not infrastructure and not gpu" \
+            --cov=src \
+            --cov-report=xml:coverage-unit.xml \
+            --cov-report=term \
+            --cov-report=html:htmlcov-unit \
+            --tb=short \
+            --junitxml=test-results-unit.xml \
+            -o junit_family=legacy
+
+      # Clean up test artifacts to free space
+      - name: Clean test cache
+        if: always()
+        run: |
+          rm -rf .pytest_cache
+          rm -rf htmlcov-unit
+          echo "After test cleanup:"
+          df -h
+
+      - name: Upload unit coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage-unit.xml
+          flags: pytest-unit
+          name: codecov-pr-ci-unit
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload unit test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test-results-unit.xml
+          flags: pytest-unit
+          name: codecov-test-results-unit
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload unit test results as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-pr-ci-unit
+          path: |
+            coverage-unit.xml
+            test-results-unit.xml
+          retention-days: 30
+
+  # Batch 2: Integration tests (needs Redis, ~3GB RAM)
+  test-integration:
+    name: Test (Integration - Batch 2/3)
+    runs-on: ubuntu-latest
+    permissions:
       pull-requests: write
       contents: write
 
@@ -109,26 +205,21 @@ jobs:
           echo "After cache clean:"
           df -h
 
-      # Verify Redis is available
-
-      - name: Run pytest with coverage (including integration tests)
-        timeout-minutes: 30
-        continue-on-error: true
+      # Run integration tests (requires Redis)
+      - name: Run integration tests with coverage
+        timeout-minutes: 25
         run: |
-          # Run all tests EXCEPT GPU and infrastructure tests
-          # Integration tests now included with Redis service container
-          timeout 25m uv run pytest tests/ \
+          echo "=== Batch 2: Integration Tests (~208 tests) ==="
+          uv run pytest tests/integration/ \
             -v \
             -m "not infrastructure and not gpu" \
-            -x \
             --cov=src \
-            --cov-report=xml:coverage-cpu.xml \
+            --cov-report=xml:coverage-integration.xml \
             --cov-report=term \
-            --cov-report=html:htmlcov-cpu \
+            --cov-report=html:htmlcov-integration \
             --tb=short \
-            --junitxml=test-results-cpu.xml \
-            -o junit_family=legacy \
-            || echo "Tests timed out or failed - continuing to upload results"
+            --junitxml=test-results-integration.xml \
+            -o junit_family=legacy
         env:
           # Redis is available via service container on localhost:6379
           REDIS_URL: "redis://localhost:6379"
@@ -138,46 +229,46 @@ jobs:
         if: always()
         run: |
           rm -rf .pytest_cache
-          rm -rf htmlcov-cpu
+          rm -rf htmlcov-integration
           echo "After test cleanup:"
           df -h
 
-      - name: Upload CPU coverage to Codecov
+      - name: Upload integration coverage to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage-cpu.xml
-          flags: pytest-cpu
-          name: codecov-pr-ci-cpu
+          files: ./coverage-integration.xml
+          flags: pytest-integration
+          name: codecov-pr-ci-integration
           fail_ci_if_error: false
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Upload CPU test results to Codecov
+      - name: Upload integration test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test-results-cpu.xml
-          flags: pytest-cpu
-          name: codecov-test-results-cpu
+          files: ./test-results-integration.xml
+          flags: pytest-integration
+          name: codecov-test-results-integration
           fail_ci_if_error: false
           verbose: true
 
-      - name: Upload CPU test results as artifacts
+      - name: Upload integration test results as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-pr-ci-cpu
+          name: test-results-pr-ci-integration
           path: |
-            coverage-cpu.xml
-            test-results-cpu.xml
+            coverage-integration.xml
+            test-results-integration.xml
           retention-days: 30
 
-  # GPU tests job (runs in parallel with CPU tests)
+  # Batch 3: GPU tests (runs in parallel, dedicated runner, ~4GB RAM)
   gpu-tests:
-    name: GPU Tests (PyTorch CUDA)
+    name: Test (GPU - Batch 3/3)
     # Use CIRun GPU runner with unique label per run for isolation
     runs-on: "cirun-gpu-8g--${{ github.run_id }}"
     permissions:
@@ -246,7 +337,7 @@ jobs:
       # Run GPU-specific tests with coverage
       - name: Run GPU tests with coverage
         run: |
-          echo "Running GPU-accelerated tests (marked with @pytest.mark.gpu)"
+          echo "=== Batch 3: GPU Tests (~20 tests) ==="
           uv run pytest tests/ \
             -v \
             -m "gpu" \
@@ -300,7 +391,7 @@ jobs:
   build:
     name: Build Check
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, gpu-tests]
+    needs: [lint, typecheck, test-unit, test-integration, gpu-tests]
     steps:
       - uses: actions/checkout@v4
 
@@ -326,8 +417,9 @@ jobs:
           echo "All quality gates passed:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Linting (ruff)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Type checking (mypy)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ CPU test suite (pytest + integration)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ GPU test suite (pytest)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit tests (~907 tests, batch 1/3)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Integration tests (~208 tests, batch 2/3)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GPU tests (~20 tests, batch 3/3)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Code coverage (codecov)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Build verification (uv lock)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

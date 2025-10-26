@@ -143,6 +143,7 @@ backends = ["asyncio"]
 
 [dependency-groups]
 dev = [
+    "awscli>=1.42.59",
     "pytest-asyncio>=1.2.0",
     "pytest-forked>=1.6.0",
     "pytest-xdist>=3.5.0",
