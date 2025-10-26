@@ -17,7 +17,7 @@ import socket
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -837,7 +837,7 @@ async def receive_audio_frames(
 
 
 @pytest.fixture(scope="function", autouse=True)
-def aggressive_memory_cleanup() -> None:
+def aggressive_memory_cleanup() -> Iterator[None]:
     """
     Aggressively clean memory after each test to prevent OOM on CI runners.
 
