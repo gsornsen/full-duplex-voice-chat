@@ -315,8 +315,17 @@ async def mock_tts_worker() -> AsyncIterator[str]:
 
     logger.info(f"Starting mock TTS worker on port {port}")
 
-    # Start worker in background
-    worker_task = asyncio.create_task(start_worker({"port": port}))
+    # Start worker in background with explicit mock adapter configuration
+    # This prevents the worker from picking up DEFAULT_MODEL from environment
+    worker_config = {
+        "port": port,
+        "model_manager": {
+            "default_model_id": "mock-440hz",  # Force mock adapter
+            "default_model_source": "test",  # Mark as test configuration
+            "warmup_enabled": False,  # Disable warmup for faster tests
+        },
+    }
+    worker_task = asyncio.create_task(start_worker(worker_config))
 
     # Wait for worker to be ready
     for attempt in range(30):
