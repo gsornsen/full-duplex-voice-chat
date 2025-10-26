@@ -37,8 +37,11 @@ runners:
     # Auto-shutdown after 5 minutes of inactivity
     idle_timeout: 5
 
-    # Machine image: Deep Learning AMI with NVIDIA drivers
-    machine_image: "ami-ubuntu-22.04-nvidia-cuda-12-1"
+    # Machine image: Deep Learning Base GPU AMI (Ubuntu 22.04)
+    # Pre-installed: NVIDIA drivers, CUDA 12.x, cuDNN
+    # Source: AWS Deep Learning AMI - Base GPU (Ubuntu 22.04)
+    # Last verified: 2025-10-25
+    machine_image: "ami-0c2d06d50ce30b442"
 
     # Environment setup (executed on runner startup)
     setup:
@@ -85,8 +88,11 @@ runners:
     # Auto-shutdown after 5 minutes of inactivity
     idle_timeout: 5
 
-    # Machine image: Deep Learning AMI with NVIDIA drivers
-    machine_image: "ami-ubuntu-22.04-nvidia-cuda-12-1"
+    # Machine image: Deep Learning Base GPU AMI (Ubuntu 22.04)
+    # Pre-installed: NVIDIA drivers, CUDA 12.x, cuDNN
+    # Source: AWS Deep Learning AMI - Base GPU (Ubuntu 22.04)
+    # Last verified: 2025-10-25
+    machine_image: "ami-0557a15b87f6559cf"
 
     # Environment setup
     setup:
