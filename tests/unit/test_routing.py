@@ -3,6 +3,7 @@
 Tests static routing, capability matching, load balancing, and graceful degradation.
 """
 
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -28,6 +29,7 @@ def mock_worker_cpu() -> WorkerRegistration:
         },
         resident_models=["piper-en-us"],
         metrics={"rtf": 0.8, "queue_depth": 2},
+        last_heartbeat_ts=time.time(),
     )
 
 
@@ -47,6 +49,7 @@ def mock_worker_gpu_en() -> WorkerRegistration:
         },
         resident_models=["xtts-v2-en"],
         metrics={"rtf": 0.3, "queue_depth": 1},
+        last_heartbeat_ts=time.time(),
     )
 
 
@@ -66,6 +69,7 @@ def mock_worker_gpu_multilang() -> WorkerRegistration:
         },
         resident_models=["cosyvoice2-multilang"],
         metrics={"rtf": 0.2, "queue_depth": 0},
+        last_heartbeat_ts=time.time(),
     )
 
 
@@ -85,6 +89,7 @@ def mock_worker_lora() -> WorkerRegistration:
         },
         resident_models=["sesame-lora-v1"],
         metrics={"rtf": 0.4, "queue_depth": 3},
+        last_heartbeat_ts=time.time(),
     )
 
 
@@ -170,13 +175,15 @@ class TestRouterDynamicDiscovery:
         assert addr == "grpc://localhost:7001"
         mock_registry.get_workers.assert_awaited_once()
 
-    async def test_dynamic_discovery_multiple_workers_returns_first(
+    async def test_dynamic_discovery_multiple_workers_returns_least_loaded(
         self,
         mock_registry: AsyncMock,
         mock_worker_cpu: WorkerRegistration,
         mock_worker_gpu_en: WorkerRegistration,
     ) -> None:
-        """Test dynamic discovery with multiple workers (M2: returns first)."""
+        """Test dynamic discovery with multiple workers uses least_loaded by default."""
+        # mock_worker_cpu has queue_depth=2
+        # mock_worker_gpu_en has queue_depth=1 (should be selected)
         mock_registry.get_workers.return_value = [
             mock_worker_cpu,
             mock_worker_gpu_en,
@@ -189,8 +196,8 @@ class TestRouterDynamicDiscovery:
 
         addr = await router.select_worker()
 
-        # M2 behavior: return first worker (no filtering)
-        assert addr == "grpc://localhost:7001"
+        # Default behavior: select least loaded worker (lowest queue depth)
+        assert addr == "grpc://localhost:7002"  # gpu_en has queue_depth=1
 
     async def test_dynamic_discovery_no_workers(
         self, mock_registry: AsyncMock
@@ -205,7 +212,7 @@ class TestRouterDynamicDiscovery:
 
         with pytest.raises(
             RuntimeError,
-            match="No workers available in registry and no static worker configured",
+            match="No workers available in registry",
         ):
             await router.select_worker()
 
@@ -221,7 +228,7 @@ class TestRouterDynamicDiscovery:
         )
 
         with pytest.raises(
-            RuntimeError, match="Redis unavailable and no static worker configured"
+            RuntimeError, match="Dynamic worker selection failed"
         ):
             await router.select_worker()
 
@@ -447,7 +454,7 @@ class TestRouterLoadBalancing:
         router = Router(
             registry=mock_registry,
             static_worker_addr=None,
-            load_balance_strategy="queue_depth",
+            load_balance_strategy="least_loaded",  # Fixed: was "queue_depth"
         )
 
         worker = await router.select_worker_dynamic()
@@ -473,7 +480,7 @@ class TestRouterLoadBalancing:
         router = Router(
             registry=mock_registry,
             static_worker_addr=None,
-            load_balance_strategy="latency",
+            load_balance_strategy="least_latency",  # Fixed: was "latency"
         )
 
         worker = await router.select_worker_dynamic()
@@ -525,6 +532,8 @@ class TestRouterLoadBalancing:
         mock_worker_gpu_en: WorkerRegistration,
     ) -> None:
         """Test fallback behavior for unknown load balancing strategy."""
+        # mock_worker_cpu has queue_depth=2
+        # mock_worker_gpu_en has queue_depth=1 (should be selected)
         mock_registry.get_workers.return_value = [
             mock_worker_cpu,
             mock_worker_gpu_en,
@@ -538,8 +547,8 @@ class TestRouterLoadBalancing:
 
         worker = await router.select_worker_dynamic()
 
-        # Should return first worker as fallback
-        assert worker.name == "tts-piper@0"
+        # Should fall back to LEAST_LOADED strategy and select least loaded worker
+        assert worker.name == "tts-xtts@0"  # queue_depth=1 (lower than cpu's 2)
 
     async def test_load_balance_single_worker(
         self,
@@ -552,7 +561,7 @@ class TestRouterLoadBalancing:
         router = Router(
             registry=mock_registry,
             static_worker_addr=None,
-            load_balance_strategy="queue_depth",
+            load_balance_strategy="least_loaded",  # Fixed: was "queue_depth"
         )
 
         worker = await router.select_worker_dynamic()
@@ -618,7 +627,7 @@ class TestRouterConfiguration:
         assert router.registry is mock_registry
         assert router.static_worker_addr is None
         assert router.prefer_resident_models is True
-        assert router.load_balance_strategy.value == "queue_depth"
+        assert router.load_balance_strategy.value == "least_loaded"  # Fixed: was "queue_depth"
         assert router._round_robin_index == 0
 
     def test_router_initialization_custom(
@@ -629,9 +638,9 @@ class TestRouterConfiguration:
             registry=mock_registry,
             static_worker_addr="grpc://custom:7001",
             prefer_resident_models=False,
-            load_balance_strategy="latency",
+            load_balance_strategy="least_latency",  # Fixed: was "latency"
         )
 
         assert router.static_worker_addr == "grpc://custom:7001"
         assert router.prefer_resident_models is False
-        assert router.load_balance_strategy.value == "latency"
+        assert router.load_balance_strategy.value == "least_latency"  # Fixed: was "latency"
