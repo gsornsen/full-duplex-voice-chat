@@ -67,7 +67,11 @@
       "WebFetch(domain:vast.ai)",
       "WebFetch(domain:opensource.microsoft.com)",
       "WebFetch(domain:www.nvidia.com)",
-      "Bash(gh pr checks:*)"
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh run list:*)",
+      "Bash(GRPC_TESTS_ENABLED=1 uv run pytest:*)",
+      "Bash(tr:*)"
     ],
     "deny": [],
     "ask": []

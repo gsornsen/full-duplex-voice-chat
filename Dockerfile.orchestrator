@@ -1,5 +1,5 @@
-# Orchestrator Dockerfile
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+# Orchestrator Dockerfile - Multi-stage build for production
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -31,8 +31,43 @@ COPY configs/ ./configs/
 # Install Python dependencies
 RUN export PATH="/root/.local/bin:$PATH" && uv sync --frozen
 
+# Production stage
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies only (smaller image)
+RUN apt-get update && apt-get install -y \
+    curl \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd -r orchestrator && useradd -r -g orchestrator -u 1000 orchestrator
+
+# Set working directory
+WORKDIR /app
+
+# Copy uv from builder
+COPY --from=builder /root/.local/bin/uv /usr/local/bin/uv
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
+
+# Copy application and dependencies from builder
+COPY --from=builder /app /app
+
+# Fix permissions for non-root user
+RUN chown -R orchestrator:orchestrator /app
+
+# Switch to non-root user
+USER orchestrator
+
 # Expose ports
 EXPOSE 8080 8081
+
+# Health check - test HTTP health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=150s --retries=3 \
+    CMD curl -f http://localhost:8081/health || exit 1
 
 # Default command
 CMD ["uv", "run", "python", "-m", "src.orchestrator.server", "--config", "configs/orchestrator.yaml"]

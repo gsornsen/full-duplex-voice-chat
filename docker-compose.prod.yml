@@ -1,0 +1,288 @@
+# Production Docker Compose Configuration
+# Optimized for production deployment with health checks, resource limits, and monitoring
+
+version: '3.8'
+
+services:
+  # Redis for service discovery
+  redis:
+    image: redis:7-alpine
+    container_name: redis-tts-prod
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "localhost", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+
+  # LiveKit server for WebRTC transport
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server-prod
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    ports:
+      - "7880:7880"   # WebRTC/WebSocket
+      - "7881:7881"   # RTC TCP port
+      - "7882:7882/udp" # TURN/UDP
+      - "50000-50099:50000-50099/udp"  # RTC port range
+    volumes:
+      - ./configs/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+
+  # Caddy reverse proxy for HTTPS
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy-prod
+    restart: unless-stopped
+    ports:
+      - "8443:8443"    # HTTPS for web client
+      - "8444:8444"    # HTTPS for LiveKit WebSocket
+      - "80:80"        # HTTP (optional, for redirects)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro
+      - ./voicechat.local+3-key.pem:/etc/caddy/voicechat.local+3-key.pem:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    depends_on:
+      livekit:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+
+  # Orchestrator service
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    image: tts-orchestrator:prod
+    container_name: orchestrator-prod
+    entrypoint: ["/app/docker/entrypoint-orchestrator.sh"]
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 90s
+    ports:
+      - "8080:8080"  # WebSocket (legacy mode)
+      - "8081:8081"  # Health check HTTP + Metrics
+    environment:
+      - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
+      - REDIS_URL=redis://redis:6379
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
+      # ASR Configuration
+      - ASR_ENABLED=true
+      - ASR_ADAPTER=whisperx
+      - ASR_DEVICE=${ASR_DEVICE:-auto}
+      - ASR_MODEL_SIZE=${ASR_MODEL_SIZE:-small}
+      - ASR_LANGUAGE=${ASR_LANGUAGE:-en}
+      - ASR_COMPUTE_TYPE=${ASR_COMPUTE_TYPE:-default}
+      # TTS Configuration
+      - TTS_WORKER_ADDRESS=tts:7001
+      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
+      # OpenAI LLM Integration
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Parallel Synthesis
+      - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
+      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-2}
+      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-2}
+      # Continuation Detection
+      - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-false}
+      # Dual-LLM
+      - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 150s
+    networks:
+      - tts-network
+    volumes:
+      - ./docker/entrypoint-orchestrator.sh:/app/docker/entrypoint-orchestrator.sh:ro
+      - ./voicepacks:/app/voicepacks:ro
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+      - mfa-cache:/root/.cache/mfa
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  # TTS Worker (Piper CPU baseline)
+  tts0:
+    profiles:
+      - piper
+    build:
+      context: .
+      dockerfile: Dockerfile.tts
+    image: tts-worker:prod
+    container_name: tts-worker-0-prod
+    restart: unless-stopped
+    ports:
+      - "7001:7001"  # gRPC
+      - "9090:9090"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-worker-0
+      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      tts-network:
+        aliases:
+          - tts
+    volumes:
+      - ./voicepacks:/app/voicepacks:ro
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  # TTS Worker (CosyVoice GPU)
+  tts-cosyvoice:
+    profiles:
+      - cosyvoice
+    build:
+      context: .
+      dockerfile: Dockerfile.tts-cosyvoice
+    image: tts-cosyvoice:prod
+    container_name: tts-cosyvoice-prod
+    restart: unless-stopped
+    ports:
+      - "7002:7001"  # gRPC
+      - "9091:9091"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-cosyvoice
+      - WORKER_PORT=7001
+      - ADAPTER_TYPE=cosyvoice2
+      - DEFAULT_MODEL=cosyvoice2-en-base
+      - DEFAULT_MODEL_ID=cosyvoice2-en-base
+      - TTL_MS=600000
+      - RESIDENT_CAP=2
+      - LOG_LEVEL=INFO
+      - GRPC_TRACE=""
+      - GRPC_VERBOSITY=ERROR
+      - PYTHONWARNINGS=ignore::FutureWarning,ignore::UserWarning
+    env_file:
+      - .env.cosyvoice
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      tts-network:
+        aliases:
+          - tts
+    volumes:
+      - ./voicepacks/cosyvoice:/app/voicepacks/cosyvoice
+      - modelscope-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+    deploy:
+      resources:
+        limits:
+          memory: 10G
+          cpus: '4.0'
+        reservations:
+          memory: 8G
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+networks:
+  tts-network:
+    driver: bridge
+
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  caddy-logs:
+    driver: local
+  huggingface-cache:
+    driver: local
+  torch-cache:
+    driver: local
+  mfa-cache:
+    driver: local
+  modelscope-cache:
+    driver: local

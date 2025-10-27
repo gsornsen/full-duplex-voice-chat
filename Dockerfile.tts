@@ -1,5 +1,5 @@
-# TTS Worker Dockerfile
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+# TTS Worker Dockerfile - Multi-stage build for production
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -28,17 +28,49 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 COPY configs/ ./configs/
 
-# Create voicepacks directory
-RUN mkdir -p voicepacks
-
 # Install Python dependencies
 RUN export PATH="/root/.local/bin:$PATH" && uv sync --frozen
+
+# Production stage
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies only (smaller image)
+RUN apt-get update && apt-get install -y \
+    curl \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd -r ttsworker && useradd -r -g ttsworker -u 1000 ttsworker
+
+# Set working directory
+WORKDIR /app
+
+# Copy uv from builder
+COPY --from=builder /root/.local/bin/uv /usr/local/bin/uv
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
+
+# Copy application and dependencies from builder
+COPY --from=builder /app /app
+
+# Create voicepacks directory with proper permissions
+RUN mkdir -p voicepacks && chown -R ttsworker:ttsworker /app
+
+# Switch to non-root user
+USER ttsworker
 
 # Expose gRPC port
 EXPOSE 7001
 
 # Expose metrics port
 EXPOSE 9090
+
+# Health check - test gRPC connectivity
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1
 
 # Default command - run worker_main module
 CMD ["uv", "run", "python", "-m", "src.tts.worker_main"]

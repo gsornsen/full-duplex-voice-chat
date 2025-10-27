@@ -618,7 +618,7 @@ class TestRouterConfiguration:
         assert router.registry is mock_registry
         assert router.static_worker_addr is None
         assert router.prefer_resident_models is True
-        assert router.load_balance_strategy == "queue_depth"
+        assert router.load_balance_strategy.value == "queue_depth"
         assert router._round_robin_index == 0
 
     def test_router_initialization_custom(
@@ -634,4 +634,4 @@ class TestRouterConfiguration:
 
         assert router.static_worker_addr == "grpc://custom:7001"
         assert router.prefer_resident_models is False
-        assert router.load_balance_strategy == "latency"
+        assert router.load_balance_strategy.value == "latency"

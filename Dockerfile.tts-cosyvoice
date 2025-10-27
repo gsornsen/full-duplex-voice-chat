@@ -1,4 +1,4 @@
-# Dockerfile for CosyVoice 2 TTS Worker
+# Dockerfile for CosyVoice 2 TTS Worker - Multi-stage build for production
 #
 # This Dockerfile creates an isolated environment for CosyVoice 2 with PyTorch 2.3.1 + CUDA 12.1
 # to avoid version conflicts with the main project (PyTorch 2.7.0 + CUDA 12.8).
@@ -6,7 +6,8 @@
 # Build: docker build -f Dockerfile.tts-cosyvoice -t tts-cosyvoice:latest .
 # Run: docker compose up tts-cosyvoice
 
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+# Builder stage
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04 AS builder
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -70,9 +71,6 @@ RUN mkdir -p /app/third_party && \
     pip3 install --no-cache-dir -r requirements.txt && \
     rm -rf .git  # Remove .git to reduce image size
 
-# Add CosyVoice and Matcha-TTS to Python path
-ENV PYTHONPATH="/app/third_party/CosyVoice:/app/third_party/CosyVoice/third_party/Matcha-TTS:${PYTHONPATH}"
-
 # Copy application code
 COPY src/ ./src/
 COPY tests/ ./tests/
@@ -90,6 +88,49 @@ RUN sed -i \
   's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' \
   src/rpc/generated/tts_pb2_grpc.py
 
+# Production stage
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    curl \
+    libsndfile1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.10 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+
+# Create non-root user for security
+RUN groupadd -r cosyvoice && useradd -r -g cosyvoice -u 1000 cosyvoice
+
+# Create Triton autotune directory
+RUN mkdir -p /root/.triton/autotune && chown -R cosyvoice:cosyvoice /root/.triton
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python dependencies from builder
+COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+
+# Copy application from builder
+COPY --from=builder /app /app
+
+# Fix permissions for non-root user
+RUN chown -R cosyvoice:cosyvoice /app
+
+# Switch to non-root user
+USER cosyvoice
+
+# Add CosyVoice and Matcha-TTS to Python path
+ENV PYTHONPATH="/app/third_party/CosyVoice:/app/third_party/CosyVoice/third_party/Matcha-TTS:${PYTHONPATH}"
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV CUDA_VISIBLE_DEVICES=0
@@ -98,9 +139,12 @@ ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 # Expose gRPC port
 EXPOSE 7001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python3 -c "import grpc; channel = grpc.insecure_channel('localhost:7001'); channel.close()" || exit 1
+# Expose metrics port
+EXPOSE 9091
+
+# Health check - test gRPC connectivity
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1
 
 # Default command (adapter and model read from environment variables)
 CMD ["python3", "-m", "src.tts", "--port", "7001"]
