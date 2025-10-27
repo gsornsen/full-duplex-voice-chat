@@ -2,6 +2,8 @@
 
 Provides HTTP health check endpoint for load balancers, monitoring systems,
 and orchestration tools (e.g., Docker healthcheck, Kubernetes liveness probe).
+
+M11: Enhanced with Prometheus metrics endpoint and comprehensive telemetry.
 """
 
 import logging
@@ -9,6 +11,8 @@ import time
 from typing import Any
 
 from aiohttp import web
+
+from src.orchestrator.metrics import get_metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,8 @@ class HealthCheckHandler:
     - Redis connectivity
     - Worker availability (optional)
     - Service uptime
+
+    M11: Added /metrics endpoint for Prometheus scraping.
     """
 
     def __init__(self, registry: Any = None, worker_client: Any = None) -> None:
@@ -32,6 +38,7 @@ class HealthCheckHandler:
         self.registry = registry
         self.worker_client = worker_client
         self.start_time = time.time()
+        self.metrics_collector = get_metrics_collector()
 
     async def health_check(self, request: web.Request) -> web.Response:
         """Health check endpoint.
@@ -131,6 +138,77 @@ class HealthCheckHandler:
             status=200,
         )
 
+    async def metrics_endpoint(self, request: web.Request) -> web.Response:
+        """Prometheus metrics endpoint (M11).
+
+        Exposes all collected metrics in Prometheus exposition format
+        for scraping by monitoring systems.
+
+        Returns:
+            200 OK: Metrics in Prometheus text format
+            Content-Type: text/plain; version=0.0.4
+
+        Format:
+            # HELP metric_name Description
+            # TYPE metric_name type
+            metric_name{label="value"} value
+        """
+        try:
+            # Export metrics in Prometheus format
+            metrics_text = self.metrics_collector.export_prometheus()
+
+            return web.Response(
+                text=metrics_text,
+                content_type="text/plain; version=0.0.4",
+                status=200,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to export metrics",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            return web.Response(
+                text=f"# Error exporting metrics: {e}\n",
+                content_type="text/plain",
+                status=500,
+            )
+
+    async def metrics_summary(self, request: web.Request) -> web.Response:
+        """Human-readable metrics summary endpoint (M11).
+
+        Returns key metrics in JSON format for dashboards and debugging.
+
+        Returns:
+            200 OK: Metrics summary in JSON format
+        """
+        try:
+            summary = self.metrics_collector.get_summary()
+
+            return web.json_response(
+                {
+                    "status": "ok",
+                    "uptime_seconds": time.time() - self.start_time,
+                    "metrics": summary,
+                },
+                status=200,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to generate metrics summary",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            return web.json_response(
+                {
+                    "status": "error",
+                    "error": str(e),
+                },
+                status=500,
+            )
+
 
 def setup_health_routes(
     app: web.Application,
@@ -146,8 +224,16 @@ def setup_health_routes(
     """
     handler = HealthCheckHandler(registry=registry, worker_client=worker_client)
 
+    # Health check endpoints
     app.router.add_get("/health", handler.health_check)
     app.router.add_get("/readiness", handler.readiness_check)
     app.router.add_get("/liveness", handler.liveness_check)
 
-    logger.info("Health check endpoints configured: /health, /readiness, /liveness")
+    # Metrics endpoints (M11)
+    app.router.add_get("/metrics", handler.metrics_endpoint)
+    app.router.add_get("/metrics/summary", handler.metrics_summary)
+
+    logger.info(
+        "Health check endpoints configured: "
+        "/health, /readiness, /liveness, /metrics, /metrics/summary"
+    )
