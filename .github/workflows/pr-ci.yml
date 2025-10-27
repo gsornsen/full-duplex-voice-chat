@@ -98,17 +98,14 @@ jobs:
           df -h
 
       # Run unit tests only (fast, no Docker/Redis needed)
-      - name: Run unit tests with coverage
+      # Coverage disabled since we skip many tests in CI (gRPC, infrastructure, etc.)
+      - name: Run unit tests
         timeout-minutes: 20
         run: |
           echo "=== Batch 1: Unit Tests (~907 tests) ==="
           uv run pytest tests/unit/ \
             -v \
             -m "not infrastructure and not gpu" \
-            --cov=src \
-            --cov-report=xml:coverage-unit.xml \
-            --cov-report=term \
-            --cov-report=html:htmlcov-unit \
             --tb=short \
             --junitxml=test-results-unit.xml \
             -o junit_family=legacy
@@ -118,41 +115,18 @@ jobs:
         if: always()
         run: |
           rm -rf .pytest_cache
-          rm -rf htmlcov-unit
           echo "After test cleanup:"
           df -h
 
-      - name: Upload unit coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage-unit.xml
-          flags: pytest-unit
-          name: codecov-pr-ci-unit
-          fail_ci_if_error: false
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload unit test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test-results-unit.xml
-          flags: pytest-unit
-          name: codecov-test-results-unit
-          fail_ci_if_error: false
-          verbose: true
+      # Coverage uploads disabled - too many tests skipped in CI for accurate coverage
+      # Run coverage locally with: just test --cov
 
       - name: Upload unit test results as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-pr-ci-unit
-          path: |
-            coverage-unit.xml
-            test-results-unit.xml
+          path: test-results-unit.xml
           retention-days: 30
 
   # Batch 2: Integration tests (needs Redis, ~3GB RAM)
@@ -206,17 +180,14 @@ jobs:
           df -h
 
       # Run integration tests (requires Redis)
-      - name: Run integration tests with coverage
+      # Coverage disabled since we skip many tests in CI (gRPC, infrastructure, etc.)
+      - name: Run integration tests
         timeout-minutes: 25
         run: |
-          echo "=== Batch 2: Integration Tests (~208 tests) ==="
+          echo "=== Batch 2: Integration Tests (86 non-gRPC tests, 87 skipped) ==="
           uv run pytest tests/integration/ \
             -v \
             -m "not infrastructure and not gpu" \
-            --cov=src \
-            --cov-report=xml:coverage-integration.xml \
-            --cov-report=term \
-            --cov-report=html:htmlcov-integration \
             --tb=short \
             --junitxml=test-results-integration.xml \
             -o junit_family=legacy
@@ -229,41 +200,18 @@ jobs:
         if: always()
         run: |
           rm -rf .pytest_cache
-          rm -rf htmlcov-integration
           echo "After test cleanup:"
           df -h
 
-      - name: Upload integration coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage-integration.xml
-          flags: pytest-integration
-          name: codecov-pr-ci-integration
-          fail_ci_if_error: false
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Upload integration test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test-results-integration.xml
-          flags: pytest-integration
-          name: codecov-test-results-integration
-          fail_ci_if_error: false
-          verbose: true
+      # Coverage uploads disabled - too many tests skipped in CI for accurate coverage
+      # Run coverage locally with: just test --cov
 
       - name: Upload integration test results as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-pr-ci-integration
-          path: |
-            coverage-integration.xml
-            test-results-integration.xml
+          path: test-results-integration.xml
           retention-days: 30
 
   # Batch 3: GPU tests (DISABLED - CIRun provisioning issues)
@@ -319,12 +267,19 @@ jobs:
           echo "All required quality gates passed:" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Linting (ruff)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Type checking (mypy)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Unit tests (~907 tests, batch 1/3)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Integration tests (~208 tests, batch 2/3)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Code coverage (codecov)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit tests (704 tests)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Integration tests (86 tests, 87 skipped)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Security scan (bandit)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dependency check" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Build verification (uv lock)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Note: GPU tests (batch 3/3) run in parallel but don't block merge." >> $GITHUB_STEP_SUMMARY
+          echo "**Tests skipped in CI:**" >> $GITHUB_STEP_SUMMARY
+          echo "- gRPC tests (segfault risk - run locally with --forked)" >> $GITHUB_STEP_SUMMARY
+          echo "- GPU tests (CIRun provisioning - run locally with -m gpu)" >> $GITHUB_STEP_SUMMARY
+          echo "- LiveKit e2e tests (auth setup - run locally with -m infrastructure)" >> $GITHUB_STEP_SUMMARY
+          echo "- CosyVoice tests (model files - run locally with -m infrastructure)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Coverage disabled in CI (too many tests skipped) - run locally: \`just test --cov\`_" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**This PR is ready to merge!** 🎉" >> $GITHUB_STEP_SUMMARY
 
