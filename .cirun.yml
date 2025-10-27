@@ -1,0 +1,128 @@
+# CIRun Configuration for GPU CI
+# Using us-west-2 and us-east-1 (IAM permissions verified)
+# Documentation: https://docs.cirun.io/reference/configuration
+
+version: "1.0"
+
+# Dual-region GPU runner configuration
+# Primary: g4dn.xlarge in us-west-2 (Oregon)
+# Fallback: g4dn.xlarge in us-east-1 (Virginia)
+runners:
+  # PRIMARY: g4dn.xlarge in us-west-2 (Oregon)
+  # - NVIDIA T4 GPU (16 GB VRAM)
+  # - Spot price ~$0.23/hr
+  # - Good availability and stable pricing
+  - name: "gpu-tests-us-west"
+    cloud: "aws"
+    region: "us-west-2"
+    instance_type: "g4dn.xlarge"
+
+    # GPU configuration
+    gpu: "nvidia-tesla-t4"
+
+    # Use spot instances for cost savings
+    preemptible: true
+
+    # Labels for GitHub Actions runner selection
+    labels:
+      - "cirun-gpu-8g"
+      - "cirun-gpu-us-west"
+
+    # Runner timeout: 30 minutes
+    timeout: 30
+
+    # Disk size: 100 GB
+    disk_size: 100
+
+    # Auto-shutdown after 5 minutes of inactivity
+    idle_timeout: 5
+
+    # Machine image: Deep Learning Base GPU AMI (Ubuntu 22.04)
+    # Pre-installed: NVIDIA drivers, CUDA 12.x, cuDNN
+    # Source: AWS Deep Learning AMI - Base GPU (Ubuntu 22.04)
+    # Last verified: 2025-10-25
+    machine_image: "ami-0c2d06d50ce30b442"
+
+    # Environment setup (executed on runner startup)
+    setup:
+      - name: "Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 curl redis-tools
+
+      - name: "Verify GPU availability"
+        run: |
+          nvidia-smi
+          echo "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+
+      - name: "Verify CUDA availability"
+        run: |
+          nvcc --version || echo "CUDA toolkit not in PATH (may be available via PyTorch)"
+
+  # FALLBACK: g4dn.xlarge in us-east-1 (Virginia)
+  # - NVIDIA T4 GPU (16 GB VRAM)
+  # - Spot price ~$0.16/hr (slightly cheaper)
+  # - Used if us-west-2 quota exhausted
+  - name: "gpu-tests-us-east"
+    cloud: "aws"
+    region: "us-east-1"
+    instance_type: "g4dn.xlarge"
+
+    # GPU configuration
+    gpu: "nvidia-tesla-t4"
+
+    # Use spot instances for cost savings
+    preemptible: true
+
+    # Labels for GitHub Actions runner selection
+    labels:
+      - "cirun-gpu-8g-fallback"
+      - "cirun-gpu-us-east"
+
+    # Runner timeout: 30 minutes
+    timeout: 30
+
+    # Disk size: 100 GB
+    disk_size: 100
+
+    # Auto-shutdown after 5 minutes of inactivity
+    idle_timeout: 5
+
+    # Machine image: Deep Learning Base GPU AMI (Ubuntu 22.04)
+    # Pre-installed: NVIDIA drivers, CUDA 12.x, cuDNN
+    # Source: AWS Deep Learning AMI - Base GPU (Ubuntu 22.04)
+    # Last verified: 2025-10-25
+    machine_image: "ami-0557a15b87f6559cf"
+
+    # Environment setup
+    setup:
+      - name: "Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 curl redis-tools
+
+      - name: "Verify GPU availability"
+        run: |
+          nvidia-smi
+          echo "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+
+      - name: "Verify CUDA availability"
+        run: |
+          nvcc --version || echo "CUDA toolkit not in PATH (may be available via PyTorch)"
+
+# Resource limits
+# Maximum concurrent GPU runners (prevents cost overruns)
+max_runners: 2
+
+# Auto-cleanup: terminate runners after job completion
+auto_cleanup: true
+
+# Monitoring and logging
+monitoring:
+  enabled: true
+  # Send metrics to CIRun dashboard
+  metrics:
+    - "gpu_utilization"
+    - "gpu_memory_used"
+    - "cpu_utilization"
+    - "disk_usage"

@@ -79,6 +79,9 @@ services:
     container_name: orchestrator
     # Use entrypoint script to select mode based on ORCHESTRATOR_MODE
     entrypoint: ["/app/docker/entrypoint-orchestrator.sh"]
+    # Graceful shutdown for LiveKit Agent worker deregistration
+    stop_signal: SIGTERM
+    stop_grace_period: 90s  # Increased from 30s to match shutdown_process_timeout
     ports:
       - "8080:8080"  # WebSocket (legacy mode only)
       - "8081:8081"  # Health check HTTP (legacy mode only)
@@ -90,34 +93,59 @@ services:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=devsecret1234567890abcdefghijklmn
+      # ASR Configuration (WhisperX)
       - ASR_ENABLED=true
       - ASR_ADAPTER=whisperx
-      - ASR_MODEL_SIZE=small
-      - ASR_DEVICE=auto
+      - ASR_DEVICE=${ASR_DEVICE:-auto}
+      - ASR_MODEL_SIZE=${ASR_MODEL_SIZE:-small}
+      - ASR_LANGUAGE=${ASR_LANGUAGE:-en}
+      - ASR_COMPUTE_TYPE=${ASR_COMPUTE_TYPE:-default}
+      # TTS Configuration
+      - TTS_WORKER_ADDRESS=tts:7001
+      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
       # Required for agent mode (OpenAI LLM integration)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # TTS worker address (Docker network alias for agent mode)
-      - TTS_WORKER_ADDRESS=tts:7001
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      # Parallel Synthesis (eliminate gaps between sentences)
+      - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
+      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-2}
+      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-2}
+      # Continuation Detection (merge thinking pauses)
+      - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-false}
+      # Dual-LLM Configuration (currently disabled due to API compatibility)
+      - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
     depends_on:
       redis:
         condition: service_healthy
       livekit:
         condition: service_healthy
-      tts0:
-        condition: service_healthy
+      # TTS worker dependency removed - orchestrator connects via network alias
+      # Either tts0 (piper profile) or tts-cosyvoice (cosyvoice profile) will provide the "tts" alias
     healthcheck:
       # Health check only works in legacy mode (agent mode doesn't expose HTTP endpoint)
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 0"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # Increased from 10s to 150s to account for:
+      # - WhisperX model download (if not cached): ~10-15s
+      # - WhisperX model loading to GPU: ~15-20s
+      # - Pre-warming initialization: ~5s
+      # - Worker registration: ~5s
+      # - Buffer time for slow systems/network: ~95s
+      start_period: 150s
     networks:
       - tts-network
     volumes:
       # Mount entrypoint script
       - ./docker/entrypoint-orchestrator.sh:/app/docker/entrypoint-orchestrator.sh:ro
+      # Mount voicepacks for config validation (read-only)
+      - ./voicepacks:/app/voicepacks:ro
+      # Persistent model caches (eliminates runtime downloads)
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+      - mfa-cache:/root/.cache/mfa
     deploy:
       resources:
         reservations:
@@ -126,8 +154,12 @@ services:
               # count: 1
               capabilities: [gpu]
 
-  # TTS worker (GPU 0)
+  # TTS Worker 0 (Default: Piper CPU)
+  # Uses environment variables: ADAPTER_TYPE, DEFAULT_MODEL
+  # For CosyVoice, use the cosyvoice profile instead (docker compose --profile cosyvoice up)
   tts0:
+    profiles:
+      - piper  # Only start with --profile piper (prevents conflict with cosyvoice profile)
     build:
       context: .
       dockerfile: Dockerfile.tts
@@ -140,6 +172,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - CUDA_VISIBLE_DEVICES=0
       - WORKER_NAME=tts-worker-0
+      # TTS Configuration - ensure model matches deployment profile
+      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
     depends_on:
       redis:
         condition: service_healthy
@@ -164,7 +200,9 @@ services:
               # device_ids: ['0']
               capabilities: [gpu]
 
-  # CosyVoice 2 TTS worker (GPU, isolated PyTorch 2.3.1 environment)
+  # TTS Worker (CosyVoice GPU)
+  # Activated with: docker compose --profile cosyvoice up
+  # Uses isolated PyTorch 2.3.1 environment (see docs/COSYVOICE_PYTORCH_CONFLICT.md)
   # This service uses a separate Dockerfile to avoid PyTorch version conflicts
   # with the main project (PyTorch 2.7.0 vs CosyVoice requirement of 2.3.1)
   tts-cosyvoice:
@@ -180,10 +218,17 @@ services:
       - CUDA_VISIBLE_DEVICES=0
       - WORKER_NAME=tts-cosyvoice
       - WORKER_PORT=7001  # Use same internal port as tts0 for network alias
+      # TTS Configuration - CosyVoice specific
+      - ADAPTER_TYPE=cosyvoice2
+      - DEFAULT_MODEL=cosyvoice2-en-base
       - DEFAULT_MODEL_ID=cosyvoice2-en-base
       - TTL_MS=600000
       - RESIDENT_CAP=2
       - LOG_LEVEL=INFO
+      # Warning suppression (cleaner logs)
+      - GRPC_TRACE=""
+      - GRPC_VERBOSITY=ERROR
+      - PYTHONWARNINGS=ignore::FutureWarning,ignore::UserWarning
     env_file:
       - .env.cosyvoice  # Optional: override with custom configuration
     depends_on:
@@ -200,10 +245,14 @@ services:
         aliases:
           - tts  # Common alias for orchestrator to connect regardless of model
     volumes:
-      # Mount voicepacks directory for CosyVoice models
-      - ./voicepacks/cosyvoice:/app/voicepacks/cosyvoice:ro
+      # Mount voicepacks directory for CosyVoice models (rw for auto-download)
+      - ./voicepacks/cosyvoice:/app/voicepacks/cosyvoice
       # Optional: Mount CosyVoice repository if needed
       # - ./third_party/CosyVoice:/app/CosyVoice:ro
+      # Persistent model caches (eliminates runtime downloads)
+      - modelscope-cache:/root/.cache/modelscope  # WeText FST files
+      - huggingface-cache:/root/.cache/huggingface  # Shared with orchestrator
+      - torch-cache:/root/.cache/torch  # Shared with orchestrator
     deploy:
       resources:
         reservations:
@@ -225,4 +274,14 @@ volumes:
   caddy-config:
     driver: local
   caddy-logs:
+    driver: local
+  # Model cache volumes (persistent across container rebuilds)
+  # Eliminates runtime downloads of WhisperX, WeText, and PyTorch models
+  huggingface-cache:
+    driver: local
+  torch-cache:
+    driver: local
+  mfa-cache:
+    driver: local
+  modelscope-cache:
     driver: local

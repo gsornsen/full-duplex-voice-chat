@@ -33,7 +33,7 @@ from src.tts.tts_base import AdapterState
 
 @pytest.fixture
 def mock_model_path(tmp_path: Path) -> Path:
-    """Create temporary voicepack directory.
+    """Create temporary voicepack directory with dummy model files.
 
     Args:
         tmp_path: pytest temporary directory fixture
@@ -43,6 +43,11 @@ def mock_model_path(tmp_path: Path) -> Path:
     """
     voicepack_dir = tmp_path / "cosyvoice-model"
     voicepack_dir.mkdir()
+
+    # Create dummy model files to skip download
+    for filename in ["cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt"]:
+        (voicepack_dir / filename).touch()
+
     return voicepack_dir
 
 
@@ -139,6 +144,10 @@ def test_init_with_string_path(tmp_path: Path, mock_cosyvoice_class: Mock) -> No
     """Test adapter initialization accepts string paths."""
     model_path = tmp_path / "model"
     model_path.mkdir()
+
+    # Create dummy model files to skip download
+    for filename in ["cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt"]:
+        (model_path / filename).touch()
 
     with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
@@ -570,6 +579,17 @@ def test_synthesize_cosyvoice_calls_inference_with_correct_params(
     assert call_kwargs["prompt_text"] == ""  # Empty for default voice
     assert call_kwargs["stream"] is False  # Batch mode for M6
     assert call_kwargs["speed"] == 1.0
+
+    # Verify prompt_speech_16k is torch.Tensor with correct shape
+    # Updated for 2-second silence prompt with batch dimension (1, 32000)
+    prompt_speech = call_kwargs["prompt_speech_16k"]
+    assert isinstance(prompt_speech, torch.Tensor), (
+        f"prompt_speech_16k must be torch.Tensor, got {type(prompt_speech)}"
+    )
+    assert prompt_speech.shape == (1, 32000), (
+        f"Expected shape (1, 32000) for 2-second silence with batch dim, got {prompt_speech.shape}"
+    )
+    assert prompt_speech.dtype == torch.float32, f"Expected float32, got {prompt_speech.dtype}"
 
 
 def test_synthesize_cosyvoice_handles_empty_audio(adapter: CosyVoiceAdapter) -> None:

@@ -18,8 +18,8 @@ from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
 
 logger = logging.getLogger(__name__)
 
-# Mark all tests in this module as gRPC tests (may be skipped in CI)
-pytestmark = pytest.mark.grpc
+# Mark all tests in this module as infrastructure (skip in CI - uses gRPC + Redis)
+pytestmark = [pytest.mark.grpc, pytest.mark.infrastructure]
 
 
 @pytest.mark.asyncio

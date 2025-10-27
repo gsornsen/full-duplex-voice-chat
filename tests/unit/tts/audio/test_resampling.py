@@ -60,19 +60,23 @@ def test_resample_audio_22k_to_48k(sine_wave_22k: NDArray[np.int16]) -> None:
         - Output length is correct (within ±1 sample due to rounding)
         - Audio duration is preserved
         - Output is not empty
+
+    Note: scipy.signal.resample_poly may produce off-by-one differences due to
+          internal filter implementation. We allow ±1 sample tolerance.
     """
     source_rate = 22050
     target_rate = 48000
     input_audio = sine_wave_22k[:100]  # Use first 100 samples for simplicity
 
-    # Expected output length: 100 * 48000 / 22050 ≈ 217.687 → 217 samples
+    # Expected output length: 100 * 48000 / 22050 ≈ 217.687 → 217 or 218 samples
+    # scipy.resample_poly may round up/down, so allow ±1 sample tolerance
     expected_length = int(len(input_audio) * target_rate / source_rate)
 
     result = resample_audio(input_audio, source_rate, target_rate)
 
-    # Verify length is correct (allow ±1 sample due to rounding)
-    assert len(result) == expected_length, (
-        f"Expected {expected_length} samples, got {len(result)}"
+    # Verify length is correct (allow ±1 sample due to scipy rounding behavior)
+    assert abs(len(result) - expected_length) <= 1, (
+        f"Expected ~{expected_length} samples (±1), got {len(result)}"
     )
 
     # Verify duration is preserved (within 1% tolerance)

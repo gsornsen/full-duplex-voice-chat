@@ -13,13 +13,19 @@ Key features:
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
+
+from src.tts.audio.framing import repacketize_to_20ms
+from src.tts.audio.processing import process_audio_for_streaming
+from src.tts.audio.resampling import resample_audio
+from src.tts.tts_base import AdapterState
 
 # Import CosyVoice 2 with graceful fallback for testing
 try:
@@ -27,22 +33,104 @@ try:
 except ImportError:
     CosyVoice2 = None  # Graceful degradation for testing
 
-from src.tts.audio.framing import repacketize_to_20ms
-from src.tts.audio.resampling import resample_audio
-from src.tts.tts_base import AdapterState
+# Import Hugging Face Hub for model download
+if TYPE_CHECKING:
+    from huggingface_hub import snapshot_download as _snapshot_download
+else:
+    try:
+        from huggingface_hub import snapshot_download as _snapshot_download
+    except ImportError:
+        _snapshot_download = None  # type: ignore[assignment]  # Graceful degradation
 
+# Type alias for snapshot_download (can be None if not installed)
+snapshot_download: Any = _snapshot_download
 # Constants
 TARGET_SAMPLE_RATE_HZ: Final[int] = 48000  # Required output sample rate
 FRAME_DURATION_MS: Final[int] = 20  # 20ms frames
 SAMPLES_PER_FRAME: Final[int] = 960  # 48000 Hz * 0.020 sec = 960 samples
-INTER_FRAME_DELAY_MS: Final[float] = 2.0  # Small delay to simulate streaming
 WARMUP_TEXT: Final[str] = "Testing warmup synthesis for model initialization."
 
 # CosyVoice 2 specific constants
 COSYVOICE_NATIVE_SAMPLE_RATE: Final[int] = 24000  # CosyVoice 2 native rate
 COSYVOICE_DEFAULT_SPEAKER: Final[str] = "default"  # Default speaker ID
+COSYVOICE_HF_REPO_ID: Final[str] = "FunAudioLLM/CosyVoice2-0.5B"  # Official Hugging Face repo
+# Silence prompt duration: 2 seconds at 16kHz provides sufficient samples for
+# mel spectrogram padding. CosyVoice requires >=1440 samples after resampling
+# for 720-sample padding. Using 2s (32000@16kHz → 48000@24kHz) provides margin.
+SILENCE_PROMPT_DURATION_SAMPLES_16KHZ: Final[int] = 32000  # 2 seconds at 16kHz
+
+# Audio normalization: Reduced from 0.95 to 0.85 to prevent resampling overshoots
+# CosyVoice outputs conservative amplitudes (~0.5 peak) to avoid clipping,
+# so we normalize to 85% of full scale to match Piper's loudness levels
+# while leaving 15% headroom for resampling/processing artifacts and fades.
+AUDIO_NORMALIZATION_TARGET_PEAK: Final[float] = 0.85  # 85% of full scale (-1.4 dBFS)
 
 logger = logging.getLogger(__name__)
+
+
+def _download_cosyvoice_model_if_needed(model_path: Path) -> None:
+    """Download CosyVoice2 model from Hugging Face if not already present.
+
+    Args:
+        model_path: Path to the voicepack directory
+
+    Raises:
+        ImportError: If huggingface_hub is not available
+        RuntimeError: If download fails
+    """
+    # Check if model already exists (look for key files)
+    required_files = ["cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt"]
+    model_exists = all((model_path / f).exists() for f in required_files)
+
+    if model_exists:
+        logger.info(
+            "CosyVoice2 model already exists, skipping download",
+            extra={"model_path": str(model_path)},
+        )
+        return
+
+    logger.info(
+        "CosyVoice2 model not found, downloading from Hugging Face",
+        extra={"model_path": str(model_path), "repo_id": COSYVOICE_HF_REPO_ID},
+    )
+
+    if snapshot_download is None:
+        raise ImportError(
+            "huggingface_hub is required to download CosyVoice2 model. "
+            "Install with: pip install huggingface-hub"
+        )
+
+    try:
+        # Create parent directory if it doesn't exist
+        model_path.mkdir(parents=True, exist_ok=True)
+
+        # Download model from Hugging Face
+        logger.info(
+            "Downloading CosyVoice2 model from Hugging Face (this may take a few minutes)...",
+            extra={"repo_id": COSYVOICE_HF_REPO_ID, "local_dir": str(model_path)},
+        )
+
+        downloaded_path = snapshot_download(
+            repo_id=COSYVOICE_HF_REPO_ID,
+            local_dir=str(model_path),
+            # Resume is now automatic in huggingface_hub 1.0+
+        )
+
+        logger.info(
+            "CosyVoice2 model downloaded successfully",
+            extra={"downloaded_path": downloaded_path, "model_path": str(model_path)},
+        )
+
+    except Exception as e:
+        logger.error(
+            "Failed to download CosyVoice2 model from Hugging Face",
+            extra={"error": str(e), "repo_id": COSYVOICE_HF_REPO_ID},
+            exc_info=True,
+        )
+        raise RuntimeError(
+            f"Failed to download CosyVoice2 model: {e}. "
+            "Please check your internet connection and try again."
+        ) from e
 
 
 class CosyVoiceAdapter:
@@ -110,6 +198,22 @@ class CosyVoiceAdapter:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # Pre-create silence prompt (cached for reuse across all synthesis calls)
+        # Avoids repeated 128KB allocations + zero-filling on every synthesis
+        # This is a CPU tensor - GPU acceleration happens later in model inference
+        self._silence_prompt_cache = torch.zeros(
+            (1, SILENCE_PROMPT_DURATION_SAMPLES_16KHZ),
+            dtype=torch.float32,
+            device="cpu",
+        )
+        logger.info(
+            "Silence prompt pre-allocated",
+            extra={"samples": SILENCE_PROMPT_DURATION_SAMPLES_16KHZ, "shape": [1, 32000]},
+        )
+
+        # Synthesis counter for telemetry (track first vs subsequent)
+        self._synthesis_count = 0
+
         logger.info(
             "Initializing CosyVoice adapter",
             extra={
@@ -122,6 +226,13 @@ class CosyVoiceAdapter:
                 ),
             },
         )
+
+        # Download model from Hugging Face if not already present
+        logger.info(
+            "Checking if CosyVoice2 model needs to be downloaded",
+            extra={"model_path": str(self.model_path)},
+        )
+        _download_cosyvoice_model_if_needed(self.model_path)
 
         # Load CosyVoice 2 model
         if CosyVoice2 is None:
@@ -174,8 +285,8 @@ class CosyVoiceAdapter:
         """Generate TTS audio for each text chunk.
 
         For each text chunk, synthesizes audio using CosyVoice 2, resamples to 48kHz,
-        and repacketizes into 20ms PCM frames. Yields frames one at a time with
-        minimal delay to simulate realistic streaming behavior.
+        and repacketizes into 20ms PCM frames. Yields frames as fast as possible to
+        minimize latency.
 
         Args:
             text_chunks: Async iterator of text chunks to synthesize
@@ -235,7 +346,7 @@ class CosyVoiceAdapter:
                     },
                 )
 
-                # Yield frames with streaming delay
+                # Yield frames immediately without artificial delay
                 for frame_idx, frame in enumerate(frames):
                     # Check if stopped (immediate termination)
                     if self.stop_event.is_set():
@@ -251,9 +362,6 @@ class CosyVoiceAdapter:
 
                     # Wait if paused (blocks until RESUME)
                     await self.pause_event.wait()
-
-                    # Small delay to simulate streaming behavior
-                    await asyncio.sleep(INTER_FRAME_DELAY_MS / 1000.0)
 
                     # Check again before yielding (race condition fix)
                     if self.stop_event.is_set():
@@ -306,6 +414,10 @@ class CosyVoiceAdapter:
             raise RuntimeError("Model not loaded")
 
         try:
+            # Performance tracking for Phase 1 optimization analysis
+            timings = {}
+            overall_start = time.perf_counter()
+
             with torch.no_grad():
                 # CosyVoice 2 streaming API
                 # inference_zero_shot() returns a generator of audio chunks
@@ -313,17 +425,55 @@ class CosyVoiceAdapter:
 
                 # For M6: Use batch mode with default voice (no reference audio)
                 # Empty prompt_text and silence reference audio for default voice
-                for chunk in self.model.inference_zero_shot(
-                    tts_text=text,
-                    prompt_text="",  # Empty for default voice
-                    prompt_speech_16k=np.zeros(16000, dtype=np.float32),  # Silence ref
-                    stream=False,  # Use batch mode for simplicity (M6)
-                    speed=1.0,
-                ):
-                    # Extract audio tensor from chunk dict
-                    # Expected format: {'tts_speech': torch.Tensor}
-                    audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
-                    audio_chunks.append(audio_tensor)
+                # CRITICAL FIX: CosyVoice expects torch.Tensor, not numpy.ndarray
+                # Convert silence reference to torch.Tensor to avoid AttributeError
+                # CosyVoice frontend preprocessing expects CPU tensors (GPU is used later)
+                # GPU acceleration happens later in the model inference pipeline
+                # PADDING FIX: Use 2-second silence (32000 samples) vs 1 second (16000)
+                # After resampling to 24kHz (48000 samples), provides sufficient length
+                # for mel spectrogram padding (requires >= 1440 samples for 720 padding)
+                # SHAPE FIX: Add batch dimension [1, samples] to match CosyVoice convention
+                # CosyVoice expects batch-first tensors: (batch, time) not just (time)
+                # Without batch dim, library incorrectly reshapes to [samples, 1] vs [1, samples]
+                # Use pre-allocated cached silence prompt (avoid repeated allocation)
+                silence_prompt = self._silence_prompt_cache
+
+                # Stage 1: CosyVoice inference (GPU)
+                inference_start = time.perf_counter()
+
+                # Retry logic for numerical instability in CosyVoice sampling
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        for chunk in self.model.inference_zero_shot(
+                            tts_text=text,
+                            prompt_text="",  # Empty for default voice
+                            prompt_speech_16k=silence_prompt,  # torch.Tensor
+                            stream=False,  # Use batch mode for simplicity (M6)
+                            speed=1.0,
+                        ):
+                            # Extract audio tensor from chunk dict
+                            # Expected format: {'tts_speech': torch.Tensor}
+                            audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
+                            audio_chunks.append(audio_tensor)
+                        break  # Success!
+                    except RuntimeError as e:
+                        if "probability tensor" in str(e) and attempt < max_retries - 1:
+                            logger.warning(
+                                f"CosyVoice sampling error (attempt {attempt + 1}/{max_retries}), "
+                                f"retrying... Error: {e}",
+                                extra={"model_id": self.model_id, "text_length": len(text)},
+                            )
+                            audio_chunks.clear()  # Clear partial results
+                            continue
+                        else:
+                            logger.error(
+                                f"CosyVoice synthesis failed after {max_retries} attempts",
+                                extra={"model_id": self.model_id, "error": str(e)},
+                            )
+                            raise
+
+                timings["inference_ms"] = (time.perf_counter() - inference_start) * 1000
 
                 # Concatenate chunks
                 if not audio_chunks:
@@ -333,22 +483,65 @@ class CosyVoiceAdapter:
                     )
                     return np.zeros(0, dtype=np.int16)
 
-                # Concatenate along sample dimension: (1, total_samples)
+                # Stage 2: Tensor concatenation
+                concat_start = time.perf_counter()
                 audio_tensor = torch.cat(audio_chunks, dim=1)
+                timings["concat_ms"] = (time.perf_counter() - concat_start) * 1000
 
-                # Convert to numpy: (1, samples) -> (samples,)
+                # Stage 3: Audio processing and type conversion
+                convert_start = time.perf_counter()
+
+                # Convert to float32 numpy for processing
                 audio_float = audio_tensor.squeeze(0).cpu().numpy()
 
-                # Convert float32 [-1, 1] to int16 [-32768, 32767]
-                audio_int16 = (audio_float * 32767).clip(-32768, 32767).astype(np.int16)
+                # Apply comprehensive audio processing pipeline
+                # This eliminates pops, clicks, static, and resampling artifacts
+                audio_processed = process_audio_for_streaming(
+                    audio_float,
+                    sample_rate=self.native_sample_rate,
+                    target_peak=AUDIO_NORMALIZATION_TARGET_PEAK,
+                    apply_fades=True,  # 5ms fade-in/out prevents boundary pops
+                    apply_dithering=True,  # Reduces quantization noise
+                )
 
-                logger.debug(
-                    "CosyVoice synthesis complete",
+                # Convert to int16 with proper clipping
+                # Clipping prevents overflow from any remaining processing artifacts
+                audio_int16 = np.clip(audio_processed * 32767.0, -32768, 32767).astype(np.int16)
+
+                timings["convert_ms"] = (time.perf_counter() - convert_start) * 1000
+
+                # Calculate overall performance metrics
+                total_ms = (time.perf_counter() - overall_start) * 1000
+                audio_duration_s = len(audio_int16) / self.native_sample_rate
+                rtf = (total_ms / 1000) / audio_duration_s if audio_duration_s > 0 else 0
+
+                # Measure peak and RMS for quality validation
+                peak = np.abs(audio_int16).max() / 32767.0
+                rms = np.sqrt(np.mean((audio_int16 / 32767.0) ** 2))
+
+                # TELEMETRY: Track first vs subsequent synthesis for performance analysis
+                is_first_synthesis = (self._synthesis_count == 0)
+                self._synthesis_count += 1
+
+                # Log comprehensive performance breakdown for Phase 1 analysis
+                logger.info(
+                    "CosyVoice synthesis performance",
                     extra={
                         "model_id": self.model_id,
                         "text_length": len(text),
+                        "audio_duration_s": round(audio_duration_s, 2),
                         "audio_samples": len(audio_int16),
-                        "audio_duration_ms": len(audio_int16) / self.native_sample_rate * 1000,
+                        "total_ms": round(total_ms, 1),
+                        "rtf": round(rtf, 3),
+                        "is_first_synthesis": is_first_synthesis,  # Track first vs subsequent
+                        "synthesis_number": self._synthesis_count,
+                        "inference_ms": round(timings["inference_ms"], 1),
+                        "concat_ms": round(timings["concat_ms"], 1),
+                        "convert_ms": round(timings["convert_ms"], 1),
+                        "inference_pct": round(timings["inference_ms"] / total_ms * 100, 1),
+                        "peak_level": round(peak, 3),
+                        "rms_level": round(rms, 3),
+                        "target_peak": AUDIO_NORMALIZATION_TARGET_PEAK,
                     },
                 )
 
@@ -575,4 +768,6 @@ class CosyVoiceAdapter:
             self.state = AdapterState.IDLE
             self.pause_event.set()
             self.stop_event.clear()
+            # Reset synthesis counter
+            self._synthesis_count = 0
             logger.info("Adapter reset to initial state", extra={"model_id": self.model_id})

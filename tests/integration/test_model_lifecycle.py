@@ -2,6 +2,9 @@
 
 Tests end-to-end model management through the worker gRPC interface,
 including dynamic loading, session management, and eviction.
+
+NOTE: These tests use gRPC and are marked as infrastructure to skip in CI.
+Run locally with: pytest -m infrastructure
 """
 
 import asyncio
@@ -13,6 +16,9 @@ import pytest
 from src.rpc.generated import tts_pb2
 from src.tts.model_manager import ModelManager
 from src.tts.worker import TTSWorkerServicer
+
+# Mark all tests in this module as infrastructure (skip in CI - uses gRPC)
+pytestmark = [pytest.mark.grpc, pytest.mark.infrastructure]
 
 
 @pytest.fixture

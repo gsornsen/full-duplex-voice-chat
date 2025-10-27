@@ -54,7 +54,20 @@
       "Bash(curl:*)",
       "Bash(ls:*)",
       "Read(//home/gerald/git/mycelium/**)",
-      "mcp__RedisMCPServer__hset"
+      "mcp__RedisMCPServer__hset",
+      "Read(//home/gerald/.cache/**)",
+      "Read(//home/gerald/**)",
+      "Bash(awk:*)",
+      "Bash(mypy:*)",
+      "Bash(gh run view:*)",
+      "Bash(sed:*)",
+      "Bash(git worktree:*)",
+      "WebFetch(domain:aws.amazon.com)",
+      "WebFetch(domain:www.runpod.io)",
+      "WebFetch(domain:vast.ai)",
+      "WebFetch(domain:opensource.microsoft.com)",
+      "WebFetch(domain:www.nvidia.com)",
+      "Bash(gh pr checks:*)"
     ],
     "deny": [],
     "ask": []
