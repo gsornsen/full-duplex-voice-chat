@@ -45,9 +45,11 @@ from tests.integration.test_utils import skip_if_grpc_unsafe
 logger = logging.getLogger(__name__)
 
 # Apply gRPC safety check to all tests in this module
+# Skip in CI to avoid gRPC segfaults
 pytestmark = [
     skip_if_grpc_unsafe,
     pytest.mark.integration,
+    pytest.mark.infrastructure,  # Skip in CI - uses gRPC
     pytest.mark.docker,
     pytest.mark.grpc,
 ]
