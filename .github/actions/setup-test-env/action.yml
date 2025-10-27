@@ -23,13 +23,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    # Install OS dependencies (libportaudio2 required for sounddevice)
+    # Install OS dependencies (libportaudio2 required for sounddevice, redis-tools for metrics tests)
     - name: Install OS dependencies
       if: inputs.skip-os-deps != 'true'
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y libportaudio2
+        sudo apt-get install -y libportaudio2 redis-tools
 
     # Install uv package manager with caching
     - name: Install uv
