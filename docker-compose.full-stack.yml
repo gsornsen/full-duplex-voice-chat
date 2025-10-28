@@ -1,0 +1,329 @@
+# Full Stack Docker Compose - All Services + Monitoring
+#
+# Includes: Redis, LiveKit, Caddy, Orchestrator, TTS Workers, Prometheus, Grafana
+#
+# Usage:
+#   docker compose -f docker-compose.full-stack.yml up -d
+#   docker compose -f docker-compose.full-stack.yml logs -f
+#
+# Access Points:
+#   - Web UI: https://localhost:8443
+#   - Grafana: http://localhost:3033 (admin/admin)
+#   - Prometheus: http://localhost:9090
+#   - LiveKit: ws://localhost:7880
+
+services:
+  # ============================================================================
+  # INFRASTRUCTURE
+  # ============================================================================
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-tts
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    restart: unless-stopped
+    command: --config /etc/livekit/config.yaml
+    ports:
+      - "7880:7880"      # WebSocket
+      - "7881:7881"      # WebRTC TCP
+      - "7882:7882/udp"  # TURN/UDP
+      - "50000-50099:50000-50099/udp"  # RTC/UDP
+    volumes:
+      - ./configs/livekit.yaml:/etc/livekit/config.yaml:ro
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tts-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8443:8443"  # HTTPS for web frontend
+      - "8444:8444"  # WSS for LiveKit
+    volumes:
+      - ./configs/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      livekit:
+        condition: service_healthy
+    networks:
+      - tts-network
+
+  # ============================================================================
+  # ORCHESTRATOR
+  # ============================================================================
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    image: full-duplex-voice-chat-orchestrator:latest
+    container_name: orchestrator
+    restart: unless-stopped
+    environment:
+      - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
+      - REDIS_URL=redis://redis:6379
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - DEFAULT_TTS_WORKER=${DEFAULT_TTS_WORKER:-tts-cosyvoice:7001}
+      - ROUTING_STRATEGY=${ROUTING_STRATEGY:-least_loaded}
+      - ROUTING_AFFINITY_ENABLED=${ROUTING_AFFINITY_ENABLED:-true}
+      - ASR_ENABLED=${ASR_ENABLED:-false}
+      - ASR_MODEL=${ASR_MODEL:-whisper-base}
+      - ASR_DEVICE=${ASR_DEVICE:-cpu}
+      - METRICS_ENABLED=true
+      - METRICS_PORT=8081
+      # Fix uv cache permissions
+      - UV_CACHE_DIR=/tmp/.uv-cache
+    ports:
+      - "8080:8080"  # WebSocket
+      - "8081:8081"  # Metrics/Health
+    volumes:
+      - ./src:/app/src:ro
+      - ./configs:/app/configs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 150s
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+  # ============================================================================
+  # TTS WORKERS
+  # ============================================================================
+
+  # Piper TTS Worker (CPU - optional, uncomment to use)
+  # tts0:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.tts
+  #   image: full-duplex-voice-chat-tts-worker:latest
+  #   container_name: tts-worker-0
+  #   restart: unless-stopped
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379
+  #     - WORKER_NAME=tts-worker-0
+  #     - WORKER_PORT=7001
+  #     - ADAPTER_TYPE=piper
+  #     - DEFAULT_MODEL=piper-en-us-lessac-medium
+  #     - METRICS_ENABLED=true
+  #     - METRICS_PORT=9090
+  #   ports:
+  #     - "7001:7001"  # gRPC
+  #     - "9090:9090"  # Metrics
+  #   volumes:
+  #     - ./src:/app/src:ro
+  #     - ./voicepacks:/app/voicepacks:ro
+  #   healthcheck:
+  #     test: ["CMD", "timeout", "1", "bash", "-c", "</dev/tcp/localhost/7001"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - tts-network
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 4G
+  #         cpus: '2.0'
+
+  # CosyVoice TTS Worker (GPU)
+  tts-cosyvoice:
+    build:
+      context: .
+      dockerfile: Dockerfile.tts-cosyvoice
+    image: full-duplex-voice-chat-tts-cosyvoice:latest
+    container_name: tts-cosyvoice
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WORKER_NAME=tts-cosyvoice
+      - WORKER_PORT=7001
+      - ADAPTER_TYPE=cosyvoice2
+      - DEFAULT_MODEL=cosyvoice2-en-base
+      - CUDA_VISIBLE_DEVICES=0
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9091
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "7002:7001"  # gRPC (avoid conflict if tts0 is also running)
+      - "9091:9091"  # Metrics
+    volumes:
+      - ./src:/app/src:ro
+      - ./voicepacks:/app/voicepacks:ro
+      - huggingface-cache:/root/.cache/huggingface:rw
+      - torch-cache:/root/.cache/torch:rw
+      - modelscope-cache:/root/.cache/modelscope:rw
+      - mfa-cache:/root/.cache/mfa:rw
+    healthcheck:
+      test: ["CMD", "timeout", "1", "bash", "-c", "</dev/tcp/localhost/7001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: '4.0'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ============================================================================
+  # MONITORING STACK
+  # ============================================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-tts
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - tts-network
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-tts
+    restart: unless-stopped
+    ports:
+      - "3033:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3033
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+networks:
+  tts-network:
+    driver: bridge
+  monitoring:
+    driver: bridge
+
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  caddy-logs:
+    driver: local
+  huggingface-cache:
+    driver: local
+  torch-cache:
+    driver: local
+  modelscope-cache:
+    driver: local
+  mfa-cache:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

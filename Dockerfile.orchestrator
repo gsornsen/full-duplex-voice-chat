@@ -56,8 +56,9 @@ COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 # Copy application and dependencies from builder
 COPY --from=builder /app /app
 
-# Fix permissions for non-root user
-RUN chown -R orchestrator:orchestrator /app
+# Create cache directories with proper permissions
+RUN mkdir -p /home/orchestrator/.cache/uv && \
+    chown -R orchestrator:orchestrator /app /home/orchestrator/.cache
 
 # Switch to non-root user
 USER orchestrator
