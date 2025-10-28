@@ -136,11 +136,9 @@ export function App({ appConfig }: AppProps) {
 
           console.log('[AGC Debug] Connecting to room with audio enabled');
 
-          // Connect to room WITH audio enabled (applies audioCaptureDefaults)
+          // Connect to room (audio will be enabled via local tracks)
           await room.connect(connectionDetails.serverUrl, connectionDetails.participantToken, {
             autoSubscribe: true,
-            audio: true,  // Enable audio during connection
-            video: false,
           });
 
           console.log('[AGC Debug] Connected to room successfully');
