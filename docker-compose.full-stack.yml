@@ -22,7 +22,7 @@ services:
     container_name: redis-tts
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6377:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -72,7 +72,9 @@ services:
       - "8443:8443"  # HTTPS for web frontend
       - "8444:8444"  # WSS for LiveKit
     volumes:
-      - ./configs/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro
+      - ./voicechat.local+3-key.pem:/etc/caddy/voicechat.local+3-key.pem:ro
       - caddy-data:/data
       - caddy-config:/config
       - caddy-logs:/var/log/caddy
@@ -100,7 +102,7 @@ services:
     restart: unless-stopped
     environment:
       - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://redis:6377
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
@@ -119,7 +121,6 @@ services:
       - "8081:8081"  # Metrics/Health
     volumes:
       - ./src:/app/src:ro
-      - ./configs:/app/configs:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -152,7 +153,7 @@ services:
   #   container_name: tts-worker-0
   #   restart: unless-stopped
   #   environment:
-  #     - REDIS_URL=redis://redis:6379
+  #     - REDIS_URL=redis://redis:6377
   #     - WORKER_NAME=tts-worker-0
   #     - WORKER_PORT=7001
   #     - ADAPTER_TYPE=piper
@@ -192,7 +193,7 @@ services:
     restart: unless-stopped
     runtime: nvidia
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://redis:6377
       - WORKER_NAME=tts-cosyvoice
       - WORKER_PORT=7001
       - ADAPTER_TYPE=cosyvoice2
