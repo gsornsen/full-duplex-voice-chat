@@ -2,7 +2,7 @@ import * as React from 'react';
 import { headers } from 'next/headers';
 import { Tabs } from '@/app/components/Tabs';
 import { Provider } from '@/components/provider';
-import { cn, getAppConfig } from '@/lib/utils';
+import { getAppConfig } from '@/lib/utils';
 
 export default async function ComponentsLayout({ children }: { children: React.ReactNode }) {
   const hdrs = await headers();

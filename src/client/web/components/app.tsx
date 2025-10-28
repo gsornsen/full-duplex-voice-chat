@@ -14,16 +14,6 @@ import type { AppConfig } from '@/lib/types';
 const MotionWelcome = motion.create(Welcome);
 const MotionSessionView = motion.create(SessionView);
 
-// Audio constraints - enable echo cancellation and noise suppression
-// to prevent agent voice feedback and filter background noise
-const AUDIO_CONSTRAINTS = {
-  autoGainControl: false,  // Keep disabled for natural voice dynamics
-  echoCancellation: true,  // ENABLE to prevent agent voice from being picked up
-  noiseSuppression: true,  // ENABLE to filter background noise
-  sampleRate: 48000,
-  channelCount: 1,
-};
-
 interface AppProps {
   appConfig: AppConfig;
 }
@@ -84,7 +74,11 @@ export function App({ appConfig }: AppProps) {
         console.error('Failed to verify microphone after reconnection:', error);
       }
     };
-    const onLocalTrackPublished = (publication: any) => {
+    const onLocalTrackPublished = (publication: {
+      kind: string;
+      trackSid?: string;
+      track?: { mediaStreamTrack: MediaStreamTrack };
+    }) => {
       // Verify AGC settings when local tracks are published
       if (publication.kind === 'audio' && publication.track) {
         const settings = publication.track.mediaStreamTrack.getSettings();

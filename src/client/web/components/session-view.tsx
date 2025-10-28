@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { RoomEvent } from 'livekit-client';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   type AgentState,
@@ -8,7 +9,6 @@ import {
   useRoomContext,
   useVoiceAssistant,
 } from '@livekit/components-react';
-import { RoomEvent } from 'livekit-client';
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
@@ -192,9 +192,7 @@ export const SessionView = ({
               >
                 {statusMessage ? (
                   <p className="inline-block text-sm font-semibold text-blue-500">
-                    {isInitializing && (
-                      <span className="mr-2 inline-block animate-spin">⚙</span>
-                    )}
+                    {isInitializing && <span className="mr-2 inline-block animate-spin">⚙</span>}
                     {statusMessage}
                   </p>
                 ) : (
