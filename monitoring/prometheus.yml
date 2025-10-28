@@ -62,26 +62,26 @@ scrape_configs:
   #         service: 'system'
   #         component: 'node-exporter'
 
-  # Redis metrics (if redis-exporter is deployed)
-  - job_name: 'redis'
-    scrape_interval: 30s
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ['redis-exporter:9121']
-        labels:
-          service: 'redis'
-          component: 'cache'
+  # Redis metrics (if redis-exporter is deployed) - currently not deployed
+  # - job_name: 'redis'
+  #   scrape_interval: 30s
+  #   scrape_timeout: 10s
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #       labels:
+  #         service: 'redis'
+  #         component: 'cache'
 
-  # LiveKit metrics (if available)
-  - job_name: 'livekit'
-    metrics_path: '/metrics'
-    scrape_interval: 30s
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ['livekit:7880']
-        labels:
-          service: 'livekit'
-          component: 'webrtc-server'
+  # LiveKit metrics (if available) - currently not exposed
+  # - job_name: 'livekit'
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 30s
+  #   scrape_timeout: 10s
+  #   static_configs:
+  #     - targets: ['livekit:7880']
+  #       labels:
+  #         service: 'livekit'
+  #         component: 'webrtc-server'
 
 # Alerting rules (optional - for production)
 # alerting:

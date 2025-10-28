@@ -17,12 +17,9 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      # Use prometheus-local.yml for local dev (just run-orch), or prometheus.yml for Docker stack
-      - ./monitoring/${PROMETHEUS_CONFIG:-prometheus-local.yml}:/etc/prometheus/prometheus.yml:ro
+      # Use prometheus.yml for Docker stack services
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    extra_hosts:
-      # Allow Prometheus to reach services running on host machine
-      - "host.docker.internal:host-gateway"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
