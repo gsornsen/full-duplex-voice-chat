@@ -3,10 +3,10 @@
 #
 # Usage:
 #   docker compose -f docker-compose.monitoring.yml up -d
-#   Access Grafana: http://localhost:3001 (admin/admin)
+#   Access Grafana: http://localhost:3033 (admin/admin)
 #   Access Prometheus: http://localhost:9090
 #
-# Note: Grafana on port 3001 to avoid conflict with LiveKit UI on 3000
+# Note: Grafana on port 3033 to avoid conflicts with LiveKit UI (3000) and other services
 
 services:
   # Prometheus metrics collector
@@ -49,12 +49,12 @@ services:
     container_name: grafana-tts
     restart: unless-stopped
     ports:
-      - "3001:3000"  # Use 3001 to avoid conflict with LiveKit UI
+      - "3033:3000"  # Use 3033 to avoid conflicts
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_SERVER_ROOT_URL=http://localhost:3033
       - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana
