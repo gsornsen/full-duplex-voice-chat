@@ -1,8 +1,10 @@
 # Development Environment
 
-**Last Updated**: 2025-10-16
+**Last Updated**: 2025-10-27
 
 This document provides detailed guidance on setting up and working with the development environment.
+
+> 📖 **Working with git worktrees?** See [git-worktrees.md](git-worktrees.md) for critical setup steps
 
 ## Python & Tooling
 
@@ -569,8 +571,61 @@ def my_function():
 uv run python -m memory_profiler my_script.py
 ```
 
+## Git Worktrees for Parallel Development
+
+When working on multiple features simultaneously, git worktrees allow independent working directories from a single repository.
+
+### Quick Setup
+
+```bash
+# Create worktree for new feature
+git worktree add ../project-feature -b feature/feature-name
+
+# Navigate and setup environment
+cd ../project-feature
+
+# ⚠️ CRITICAL: Install dev dependencies
+uv sync --all-extras
+
+# Generate proto files (if needed)
+uv run just gen-proto
+
+# Verify pre-push hook works
+.git/hooks/pre-push origin refs/heads/feature/feature-name
+```
+
+### Why `uv sync --all-extras` is Required
+
+Git worktrees share `.git` but have **independent Python environments**. Without running `uv sync --all-extras`:
+- Pre-push hooks fail (mypy, ruff not found)
+- CI catches errors that local checks miss
+- Type stubs missing (types-redis, types-pyyaml)
+
+### Common Issues
+
+**"mypy: command not found" in worktree**
+```bash
+cd /path/to/worktree
+uv sync --all-extras
+```
+
+**Tests pass locally, fail in CI**
+- Forgot `uv sync --all-extras`
+- Used `--no-verify` to bypass checks
+- See [git-worktrees.md](git-worktrees.md) for full troubleshooting
+
+### Never Use `--no-verify`
+
+The pre-push hook now strongly discourages `--no-verify`:
+- Fix issues locally instead
+- Run `just ci` to catch problems early
+- CI failures waste team time
+
+📖 **Full Guide**: See [git-worktrees.md](git-worktrees.md) for complete worktree best practices
+
 ## References
 
+- **Git Worktrees**: [git-worktrees.md](git-worktrees.md) ⭐ **New**
 - **Testing Guide**: [testing.md](testing.md)
 - **CI/CD Pipeline**: [testing.md#ci-cd-pipeline](testing.md#ci-cd-pipeline)
 - **Architecture Details**: [architecture.md](architecture.md)
