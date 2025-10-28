@@ -4,6 +4,7 @@ Tests routing logic, capability matching, load balancing, and session affinity.
 """
 
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,7 +14,7 @@ from src.orchestrator.routing import Router, RoutingStrategy
 
 
 @pytest.fixture
-def mock_registry():
+def mock_registry() -> Any:
     """Create mock worker registry."""
     registry = MagicMock(spec=WorkerRegistry)
     registry.health_check = AsyncMock(return_value=True)
@@ -23,7 +24,7 @@ def mock_registry():
 
 
 @pytest.fixture
-def sample_workers():
+def sample_workers() -> Any:
     """Create sample worker registrations for testing."""
     current_time = time.time()
 
@@ -68,7 +69,7 @@ def sample_workers():
 
 
 @pytest.fixture
-async def router_with_redis(mock_registry):
+async def router_with_redis(mock_registry: Any) -> Any:
     """Create router with Redis support."""
     # Mock Redis connection
     with patch("src.orchestrator.routing.aioredis") as mock_redis:
@@ -96,7 +97,7 @@ async def router_with_redis(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_static_routing(mock_registry):
+async def test_static_routing(mock_registry: Any) -> None:
     """Test static routing bypasses discovery."""
     router = Router(
         registry=mock_registry,
@@ -111,7 +112,7 @@ async def test_static_routing(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_static_routing_ignores_session_affinity(mock_registry):
+async def test_static_routing_ignores_session_affinity(mock_registry: Any) -> None:
     """Test static routing ignores session affinity."""
     router = Router(
         registry=mock_registry,
@@ -132,7 +133,7 @@ async def test_static_routing_ignores_session_affinity(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_capability_filter_language(mock_registry, sample_workers):
+async def test_capability_filter_language(mock_registry: Any, sample_workers: Any) -> None:
     """Test filtering workers by language capability."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -146,7 +147,7 @@ async def test_capability_filter_language(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_capability_filter_streaming(mock_registry, sample_workers):
+async def test_capability_filter_streaming(mock_registry: Any, sample_workers: Any) -> None:
     """Test filtering workers by streaming capability."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -160,7 +161,7 @@ async def test_capability_filter_streaming(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_capability_filter_zero_shot(mock_registry, sample_workers):
+async def test_capability_filter_zero_shot(mock_registry: Any, sample_workers: Any) -> None:
     """Test filtering workers by zero-shot capability."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -174,7 +175,7 @@ async def test_capability_filter_zero_shot(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_capability_filter_multiple(mock_registry, sample_workers):
+async def test_capability_filter_multiple(mock_registry: Any, sample_workers: Any) -> None:
     """Test filtering workers by multiple capabilities."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -191,7 +192,7 @@ async def test_capability_filter_multiple(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_no_workers_match_capability(mock_registry, sample_workers):
+async def test_no_workers_match_capability(mock_registry: Any, sample_workers: Any) -> None:
     """Test error when no workers match capability."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -208,7 +209,9 @@ async def test_no_workers_match_capability(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_health_filter_excludes_stale_workers(mock_registry, sample_workers):
+async def test_health_filter_excludes_stale_workers(
+    mock_registry: Any, sample_workers: Any
+) -> None:
     """Test health filter excludes workers with stale heartbeats."""
     # Make worker-1 unhealthy (heartbeat 2 minutes ago)
     sample_workers[1].last_heartbeat_ts = time.time() - 120
@@ -227,7 +230,7 @@ async def test_health_filter_excludes_stale_workers(mock_registry, sample_worker
 
 
 @pytest.mark.asyncio
-async def test_all_workers_unhealthy_error(mock_registry, sample_workers):
+async def test_all_workers_unhealthy_error(mock_registry: Any, sample_workers: Any) -> None:
     """Test error when all workers are unhealthy."""
     # Make all workers unhealthy
     for worker in sample_workers:
@@ -251,7 +254,7 @@ async def test_all_workers_unhealthy_error(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_least_loaded_strategy(mock_registry, sample_workers):
+async def test_least_loaded_strategy(mock_registry: Any, sample_workers: Any) -> None:
     """Test least-loaded strategy selects worker with lowest queue depth."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -268,7 +271,7 @@ async def test_least_loaded_strategy(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_least_latency_strategy(mock_registry, sample_workers):
+async def test_least_latency_strategy(mock_registry: Any, sample_workers: Any) -> None:
     """Test least-latency strategy selects worker with lowest RTF."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -285,7 +288,7 @@ async def test_least_latency_strategy(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_round_robin_strategy(mock_registry, sample_workers):
+async def test_round_robin_strategy(mock_registry: Any, sample_workers: Any) -> None:
     """Test round-robin strategy distributes requests evenly."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -312,7 +315,7 @@ async def test_round_robin_strategy(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_random_strategy(mock_registry, sample_workers):
+async def test_random_strategy(mock_registry: Any, sample_workers: Any) -> None:
     """Test random strategy selects workers."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -338,8 +341,8 @@ async def test_random_strategy(mock_registry, sample_workers):
 
 @pytest.mark.asyncio
 async def test_session_affinity_miss_creates_mapping(
-    router_with_redis, mock_registry, sample_workers
-):
+    router_with_redis: Any, mock_registry: Any, sample_workers: Any
+) -> None:
     """Test session affinity creates mapping on first request."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -366,7 +369,9 @@ async def test_session_affinity_miss_creates_mapping(
 
 
 @pytest.mark.asyncio
-async def test_session_affinity_hit_reuses_worker(router_with_redis, mock_registry, sample_workers):
+async def test_session_affinity_hit_reuses_worker(
+    router_with_redis: Any, mock_registry: Any, sample_workers: Any
+) -> None:
     """Test session affinity reuses same worker."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -386,8 +391,8 @@ async def test_session_affinity_hit_reuses_worker(router_with_redis, mock_regist
 
 @pytest.mark.asyncio
 async def test_session_affinity_worker_unavailable(
-    router_with_redis, mock_registry, sample_workers
-):
+    router_with_redis: Any, mock_registry: Any, sample_workers: Any
+) -> None:
     """Test session affinity falls back when worker unavailable."""
     # Only return worker-0 and worker-2 (worker-1 is missing)
     mock_registry.get_workers.return_value = [sample_workers[0], sample_workers[2]]
@@ -406,7 +411,7 @@ async def test_session_affinity_worker_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_session_affinity_disabled(mock_registry, sample_workers):
+async def test_session_affinity_disabled(mock_registry: Any, sample_workers: Any) -> None:
     """Test routing works with session affinity disabled."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -427,7 +432,7 @@ async def test_session_affinity_disabled(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_prefer_resident_model(mock_registry, sample_workers):
+async def test_prefer_resident_model(mock_registry: Any, sample_workers: Any) -> None:
     """Test router prefers workers with resident model."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -445,7 +450,7 @@ async def test_prefer_resident_model(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_no_resident_model_fallback(mock_registry, sample_workers):
+async def test_no_resident_model_fallback(mock_registry: Any, sample_workers: Any) -> None:
     """Test router falls back when no workers have resident model."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -462,7 +467,7 @@ async def test_no_resident_model_fallback(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_resident_model_preference_disabled(mock_registry, sample_workers):
+async def test_resident_model_preference_disabled(mock_registry: Any, sample_workers: Any) -> None:
     """Test resident model preference can be disabled."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -484,7 +489,7 @@ async def test_resident_model_preference_disabled(mock_registry, sample_workers)
 
 
 @pytest.mark.asyncio
-async def test_routing_metrics_tracking(mock_registry, sample_workers):
+async def test_routing_metrics_tracking(mock_registry: Any, sample_workers: Any) -> None:
     """Test routing metrics are tracked correctly."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -503,7 +508,7 @@ async def test_routing_metrics_tracking(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_routing_latency_threshold(mock_registry, sample_workers):
+async def test_routing_latency_threshold(mock_registry: Any, sample_workers: Any) -> None:
     """Test routing decision latency meets SLA (<1ms p95)."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -526,7 +531,7 @@ async def test_routing_latency_threshold(mock_registry, sample_workers):
 
 
 @pytest.mark.asyncio
-async def test_no_workers_available(mock_registry):
+async def test_no_workers_available(mock_registry: Any) -> None:
     """Test error when no workers are registered."""
     mock_registry.get_workers.return_value = []
 
@@ -537,7 +542,7 @@ async def test_no_workers_available(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_registry_connection_error(mock_registry):
+async def test_registry_connection_error(mock_registry: Any) -> None:
     """Test handling of registry connection errors."""
     mock_registry.get_workers.side_effect = ConnectionError("Redis unavailable")
 
@@ -551,7 +556,7 @@ async def test_registry_connection_error(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_invalid_routing_strategy(mock_registry):
+async def test_invalid_routing_strategy(mock_registry: Any) -> None:
     """Test invalid routing strategy falls back gracefully."""
     router = Router(
         registry=mock_registry,
@@ -568,7 +573,9 @@ async def test_invalid_routing_strategy(mock_registry):
 
 
 @pytest.mark.asyncio
-async def test_full_routing_pipeline(router_with_redis, mock_registry, sample_workers):
+async def test_full_routing_pipeline(
+    router_with_redis: Any, mock_registry: Any, sample_workers: Any
+) -> None:
     """Test complete routing pipeline with all features."""
     mock_registry.get_workers.return_value = sample_workers
 
@@ -597,7 +604,9 @@ async def test_full_routing_pipeline(router_with_redis, mock_registry, sample_wo
 
 
 @pytest.mark.asyncio
-async def test_multi_request_affinity_consistency(router_with_redis, mock_registry, sample_workers):
+async def test_multi_request_affinity_consistency(
+    router_with_redis: Any, mock_registry: Any, sample_workers: Any
+) -> None:
     """Test session affinity maintains consistency across multiple requests."""
     mock_registry.get_workers.return_value = sample_workers
 
