@@ -84,10 +84,43 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
+      web:
+        condition: service_healthy
       livekit:
         condition: service_healthy
     networks:
       - tts-network
+
+  # ============================================================================
+  # WEB FRONTEND
+  # ============================================================================
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: full-duplex-voice-chat-web:latest
+    container_name: web-frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_LIVEKIT_URL=wss://voicechat.local:8444
+      - NEXT_PUBLIC_LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
 
   # ============================================================================
   # ORCHESTRATOR

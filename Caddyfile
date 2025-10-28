@@ -28,9 +28,8 @@ https://voicechat.local:8443 {
     # Use mkcert-generated trusted certificate
     tls /etc/caddy/voicechat.local+3.pem /etc/caddy/voicechat.local+3-key.pem
 
-    # Proxy to Next.js web client running on host
-    # Use host.docker.internal to reach host machine from Docker
-    reverse_proxy host.docker.internal:3000 {
+    # Proxy to Next.js web client running in Docker
+    reverse_proxy web:3000 {
         # Forward original host header
         header_up Host {upstream_hostport}
         # Forward real client IP
@@ -52,9 +51,8 @@ https://voicechat.local:8444 {
     # Use mkcert-generated trusted certificate
     tls /etc/caddy/voicechat.local+3.pem /etc/caddy/voicechat.local+3-key.pem
 
-    # Proxy to LiveKit server
-    # Use host.docker.internal to reach host machine from Docker (works for both Docker Compose and local dev)
-    reverse_proxy host.docker.internal:7880 {
+    # Proxy to LiveKit server running in Docker
+    reverse_proxy livekit:7880 {
         # WebSocket upgrade headers
         header_up Upgrade {http.request.header.Upgrade}
         header_up Connection {http.request.header.Connection}
