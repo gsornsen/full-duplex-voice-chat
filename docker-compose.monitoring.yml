@@ -3,10 +3,10 @@
 #
 # Usage:
 #   docker compose -f docker-compose.monitoring.yml up -d
-#   Access Grafana: http://localhost:3000 (admin/admin)
+#   Access Grafana: http://localhost:3001 (admin/admin)
 #   Access Prometheus: http://localhost:9090
-
-version: '3.8'
+#
+# Note: Grafana on port 3001 to avoid conflict with LiveKit UI on 3000
 
 services:
   # Prometheus metrics collector
@@ -49,12 +49,12 @@ services:
     container_name: grafana-tts
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"  # Use 3001 to avoid conflict with LiveKit UI
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_ROOT_URL=http://localhost:3001
       - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana
@@ -79,25 +79,26 @@ services:
         reservations:
           memory: 256M
 
-  # Node Exporter for system metrics (optional)
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node-exporter-tts
-    restart: unless-stopped
-    ports:
-      - "9100:9100"
-    command:
-      - '--path.rootfs=/host'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    volumes:
-      - /:/host:ro,rslave
-    networks:
-      - monitoring
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.25'
+  # Node Exporter for system metrics (optional - disabled due to WSL2 mount issues)
+  # Uncomment if running on native Linux with proper mount propagation
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: node-exporter-tts
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9100:9100"
+  #   command:
+  #     - '--path.rootfs=/host'
+  #     - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+  #   volumes:
+  #     - /:/host:ro,rslave
+  #   networks:
+  #     - monitoring
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128M
+  #         cpus: '0.25'
 
 networks:
   monitoring:

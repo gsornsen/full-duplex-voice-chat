@@ -51,15 +51,16 @@ scrape_configs:
           adapter: 'cosyvoice2'
           device: 'gpu'
 
-  # System metrics (node-exporter)
-  - job_name: 'node-exporter'
-    scrape_interval: 30s
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ['node-exporter:9100']
-        labels:
-          service: 'system'
-          component: 'node-exporter'
+  # System metrics (node-exporter) - disabled due to WSL2 mount issues
+  # Uncomment if running on native Linux
+  # - job_name: 'node-exporter'
+  #   scrape_interval: 30s
+  #   scrape_timeout: 10s
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #       labels:
+  #         service: 'system'
+  #         component: 'node-exporter'
 
   # Redis metrics (if redis-exporter is deployed)
   - job_name: 'redis'
