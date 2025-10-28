@@ -4,6 +4,7 @@ Tests selection algorithms for load balancing.
 """
 
 import time
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,7 @@ from src.orchestrator.worker_selector import WorkerSelector
 
 
 @pytest.fixture
-def sample_workers():
+def sample_workers() -> Any:
     """Create sample worker registrations for testing."""
     current_time = time.time()
 
@@ -45,7 +46,7 @@ def sample_workers():
 
 
 @pytest.fixture
-def selector():
+def selector() -> Any:
     """Create WorkerSelector instance."""
     return WorkerSelector()
 
@@ -55,7 +56,7 @@ def selector():
 # =============================================================================
 
 
-def test_round_robin_cycles_through_workers(selector, sample_workers):
+def test_round_robin_cycles_through_workers(selector: Any, sample_workers: Any) -> None:
     """Test round-robin cycles through workers in order."""
     selections = []
 
@@ -70,7 +71,7 @@ def test_round_robin_cycles_through_workers(selector, sample_workers):
     ]
 
 
-def test_round_robin_single_worker(selector):
+def test_round_robin_single_worker(selector: Any) -> None:
     """Test round-robin with single worker."""
     worker = WorkerRegistration(
         name="solo-worker",
@@ -87,7 +88,7 @@ def test_round_robin_single_worker(selector):
         assert selected.name == "solo-worker"
 
 
-def test_round_robin_empty_list_error(selector):
+def test_round_robin_empty_list_error(selector: Any) -> None:
     """Test round-robin raises error with empty list."""
     with pytest.raises(ValueError, match="Cannot select from empty worker list"):
         selector.round_robin([])
@@ -98,7 +99,7 @@ def test_round_robin_empty_list_error(selector):
 # =============================================================================
 
 
-def test_least_loaded_selects_lowest_queue(selector, sample_workers):
+def test_least_loaded_selects_lowest_queue(selector: Any, sample_workers: Any) -> None:
     """Test least-loaded selects worker with lowest queue depth."""
     selected = selector.least_loaded(sample_workers)
 
@@ -107,7 +108,7 @@ def test_least_loaded_selects_lowest_queue(selector, sample_workers):
     assert selected.metrics["queue_depth"] == 0
 
 
-def test_least_loaded_with_missing_metrics(selector):
+def test_least_loaded_with_missing_metrics(selector: Any) -> None:
     """Test least-loaded handles missing metrics."""
     workers = [
         WorkerRegistration(
@@ -134,7 +135,7 @@ def test_least_loaded_with_missing_metrics(selector):
     assert selected.name == "worker-with-metrics"
 
 
-def test_least_loaded_all_equal(selector):
+def test_least_loaded_all_equal(selector: Any) -> None:
     """Test least-loaded when all workers have same queue depth."""
     workers = [
         WorkerRegistration(
@@ -154,7 +155,7 @@ def test_least_loaded_all_equal(selector):
     assert selected.name in [w.name for w in workers]
 
 
-def test_least_loaded_empty_list_error(selector):
+def test_least_loaded_empty_list_error(selector: Any) -> None:
     """Test least-loaded raises error with empty list."""
     with pytest.raises(ValueError, match="Cannot select from empty worker list"):
         selector.least_loaded([])
@@ -165,7 +166,7 @@ def test_least_loaded_empty_list_error(selector):
 # =============================================================================
 
 
-def test_least_latency_selects_lowest_rtf(selector, sample_workers):
+def test_least_latency_selects_lowest_rtf(selector: Any, sample_workers: Any) -> None:
     """Test least-latency selects worker with lowest RTF."""
     selected = selector.least_latency(sample_workers)
 
@@ -174,7 +175,7 @@ def test_least_latency_selects_lowest_rtf(selector, sample_workers):
     assert selected.metrics["rtf"] == 0.3
 
 
-def test_least_latency_with_missing_metrics(selector):
+def test_least_latency_with_missing_metrics(selector: Any) -> None:
     """Test least-latency handles missing metrics."""
     workers = [
         WorkerRegistration(
@@ -201,7 +202,7 @@ def test_least_latency_with_missing_metrics(selector):
     assert selected.name == "worker-with-metrics"
 
 
-def test_least_latency_empty_list_error(selector):
+def test_least_latency_empty_list_error(selector: Any) -> None:
     """Test least-latency raises error with empty list."""
     with pytest.raises(ValueError, match="Cannot select from empty worker list"):
         selector.least_latency([])
@@ -212,7 +213,7 @@ def test_least_latency_empty_list_error(selector):
 # =============================================================================
 
 
-def test_random_selection_variability(selector, sample_workers):
+def test_random_selection_variability(selector: Any, sample_workers: Any) -> None:
     """Test random selection produces variable results."""
     selections = set()
 
@@ -225,7 +226,7 @@ def test_random_selection_variability(selector, sample_workers):
     assert len(selections) >= 2
 
 
-def test_random_selection_single_worker(selector):
+def test_random_selection_single_worker(selector: Any) -> None:
     """Test random selection with single worker."""
     worker = WorkerRegistration(
         name="solo-worker",
@@ -242,7 +243,7 @@ def test_random_selection_single_worker(selector):
         assert selected.name == "solo-worker"
 
 
-def test_random_selection_empty_list_error(selector):
+def test_random_selection_empty_list_error(selector: Any) -> None:
     """Test random raises error with empty list."""
     with pytest.raises(ValueError, match="Cannot select from empty worker list"):
         selector.random([])
@@ -253,7 +254,7 @@ def test_random_selection_empty_list_error(selector):
 # =============================================================================
 
 
-def test_weighted_selection_combines_metrics(selector, sample_workers):
+def test_weighted_selection_combines_metrics(selector: Any, sample_workers: Any) -> None:
     """Test weighted selection combines queue and latency metrics."""
     # Default weights: queue=0.7, latency=0.3
     selected = selector.weighted_selection(sample_workers)
@@ -271,7 +272,7 @@ def test_weighted_selection_combines_metrics(selector, sample_workers):
     assert selected.name == "worker-0"
 
 
-def test_weighted_selection_custom_weights(selector, sample_workers):
+def test_weighted_selection_custom_weights(selector: Any, sample_workers: Any) -> None:
     """Test weighted selection with custom weights."""
     # Heavy weight on latency
     selected = selector.weighted_selection(
@@ -284,7 +285,7 @@ def test_weighted_selection_custom_weights(selector, sample_workers):
     assert selected.name == "worker-1"
 
 
-def test_weighted_selection_invalid_weights(selector, sample_workers):
+def test_weighted_selection_invalid_weights(selector: Any, sample_workers: Any) -> None:
     """Test weighted selection rejects invalid weights."""
     with pytest.raises(ValueError, match="Weights must sum to 1.0"):
         selector.weighted_selection(
@@ -294,7 +295,7 @@ def test_weighted_selection_invalid_weights(selector, sample_workers):
         )
 
 
-def test_weighted_selection_empty_list_error(selector):
+def test_weighted_selection_empty_list_error(selector: Any) -> None:
     """Test weighted selection raises error with empty list."""
     with pytest.raises(ValueError, match="Cannot select from empty worker list"):
         selector.weighted_selection([])
@@ -305,33 +306,33 @@ def test_weighted_selection_empty_list_error(selector):
 # =============================================================================
 
 
-def test_selection_performance_benchmark(selector, sample_workers):
+def test_selection_performance_benchmark(selector: Any, sample_workers: Any) -> None:
     """Test selection algorithms meet performance targets (<100μs)."""
     import timeit
 
     # Test round-robin performance
-    def test_round_robin():
+    def test_round_robin() -> None:
         selector.round_robin(sample_workers)
 
     rr_time = timeit.timeit(test_round_robin, number=1000) / 1000
     assert rr_time < 0.0001  # <100μs per call
 
     # Test least-loaded performance
-    def test_least_loaded():
+    def test_least_loaded() -> None:
         selector.least_loaded(sample_workers)
 
     ll_time = timeit.timeit(test_least_loaded, number=1000) / 1000
     assert ll_time < 0.0001  # <100μs per call
 
     # Test least-latency performance
-    def test_least_latency():
+    def test_least_latency() -> None:
         selector.least_latency(sample_workers)
 
     lat_time = timeit.timeit(test_least_latency, number=1000) / 1000
     assert lat_time < 0.0001  # <100μs per call
 
 
-def test_selection_with_large_worker_pool(selector):
+def test_selection_with_large_worker_pool(selector: Any) -> None:
     """Test selection algorithms scale to large worker pools."""
     # Create 100 workers
     workers = [
@@ -359,7 +360,7 @@ def test_selection_with_large_worker_pool(selector):
 # =============================================================================
 
 
-def test_all_algorithms_with_two_workers(selector):
+def test_all_algorithms_with_two_workers(selector: Any) -> None:
     """Test all algorithms work with two workers."""
     workers = [
         WorkerRegistration(
@@ -394,7 +395,7 @@ def test_all_algorithms_with_two_workers(selector):
     assert selector.random(workers).name in ["worker-a", "worker-b"]
 
 
-def test_selector_state_isolation(selector, sample_workers):
+def test_selector_state_isolation(selector: Any, sample_workers: Any) -> None:
     """Test selector maintains state correctly across calls."""
     # Make several round-robin selections
     selections1 = [selector.round_robin(sample_workers).name for _ in range(3)]
@@ -407,7 +408,7 @@ def test_selector_state_isolation(selector, sample_workers):
     assert selections2 == ["worker-0", "worker-1", "worker-2"]
 
 
-def test_selector_thread_safety_simulation(selector, sample_workers):
+def test_selector_thread_safety_simulation(selector: Any, sample_workers: Any) -> None:
     """Test selector works correctly with interleaved calls."""
     # Simulate concurrent calls by interleaving different strategies
     results = []

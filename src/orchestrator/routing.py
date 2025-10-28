@@ -143,7 +143,8 @@ class Router:
         self.selector = WorkerSelector()
 
         # Redis client for session affinity (lazy initialization)
-        self._redis: aioredis.Redis[Any] | None = None
+        # Note: Redis type doesn't accept type parameters in this version
+        self._redis: aioredis.Redis[str] | None = None
         self._redis_connected = False
 
         # Round-robin state (M2/M9)
