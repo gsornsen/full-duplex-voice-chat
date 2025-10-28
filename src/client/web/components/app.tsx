@@ -157,7 +157,7 @@ export function App({ appConfig }: AppProps) {
 
           toastAlert({
             title: 'There was an error connecting to the agent',
-            description: `${error.name}: ${error.message}`,
+            description: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
           });
         }
       })();
