@@ -57,8 +57,10 @@ COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=builder /app /app
 
 # Create cache directories with proper permissions
+# Fix permissions for .venv and all app files
 RUN mkdir -p /home/orchestrator/.cache/uv && \
-    chown -R orchestrator:orchestrator /app /home/orchestrator/.cache
+    chown -R orchestrator:orchestrator /app /home/orchestrator/.cache && \
+    chmod -R 755 /app
 
 # Switch to non-root user
 USER orchestrator
