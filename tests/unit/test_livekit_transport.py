@@ -117,7 +117,7 @@ class TestLiveKitSession:
         with (
             patch("orchestrator.transport.livekit_transport.rtc.AudioSource") as mock_source,
             patch(
-                "src.orchestrator.transport.livekit_transport.rtc.LocalAudioTrack"
+                "orchestrator.transport.livekit_transport.rtc.LocalAudioTrack"
             ) as mock_track_class,
         ):
             mock_audio_source = Mock()
@@ -221,7 +221,7 @@ class TestLiveKitTransport:
     ) -> None:
         """Test transport is properly initialized."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -235,7 +235,7 @@ class TestLiveKitTransport:
     ) -> None:
         """Test starting transport successfully."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -253,7 +253,7 @@ class TestLiveKitTransport:
     ) -> None:
         """Test starting transport when already running raises error."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -272,7 +272,7 @@ class TestLiveKitTransport:
         mock_room_manager.list_rooms.side_effect = Exception("Connection failed")
 
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -287,7 +287,7 @@ class TestLiveKitTransport:
     ) -> None:
         """Test stopping transport cleans up resources."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -315,7 +315,7 @@ class TestLiveKitTransport:
     ) -> None:
         """Test stopping transport multiple times is safe."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
@@ -335,11 +335,10 @@ class TestLiveKitTransport:
     ) -> None:
         """Test accept_session raises error when transport not running."""
         with patch(
-            "src.orchestrator.transport.livekit_transport.LiveKitRoomManager",
+            "orchestrator.transport.livekit_transport.LiveKitRoomManager",
             return_value=mock_room_manager,
         ):
             transport = LiveKitTransport(livekit_config)
 
             with pytest.raises(RuntimeError, match="not running"):
                 await asyncio.wait_for(transport.accept_session(), timeout=0.1)
-
