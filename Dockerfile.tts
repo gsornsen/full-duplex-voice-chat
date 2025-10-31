@@ -97,8 +97,11 @@ COPY --from=builder --chown=ttsworker:ttsworker /app/pyproject.toml /app/uv.lock
 COPY --from=builder --chown=ttsworker:ttsworker /app/packages /app/packages
 COPY --from=builder --chown=ttsworker:ttsworker /app/configs /app/configs
 
-# Copy installed Python packages from builder
-COPY --from=builder --chown=ttsworker:ttsworker /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+# Copy .venv from builder (contains all installed packages)
+COPY --from=builder --chown=ttsworker:ttsworker /app/.venv /app/.venv
+
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Set environment variables for cache directories
 ENV UV_CACHE_DIR=/home/ttsworker/.cache/uv
