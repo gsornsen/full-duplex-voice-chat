@@ -9,13 +9,24 @@ FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies including Python 3.12
 RUN apt-get update && apt-get install -y \
     curl \
     git \
     build-essential \
     libsndfile1 \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
 # Install uv (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -26,17 +37,22 @@ ENV PATH="/root/.local/bin:$PATH"
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files first (better layer caching)
+# Copy workspace root files first (better layer caching)
 COPY pyproject.toml uv.lock README.md ./
 
+# Copy workspace packages needed by orchestrator
+COPY packages/proto/ ./packages/proto/
+COPY packages/common/ ./packages/common/
+COPY packages/tts-base/ ./packages/tts-base/
+COPY packages/orchestrator/ ./packages/orchestrator/
+
 # Install Python dependencies with cache mount (BuildKit optimization)
-# This dramatically speeds up rebuilds by caching downloaded packages
+# Use --system to install into system Python (container-only pattern)
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
-    uv sync --frozen
+    uv pip install --system -e packages/proto -e packages/common -e packages/tts-base -e packages/orchestrator
 
-# Copy application code (changes frequently, so do this last)
-COPY src/ ./src/
+# Copy config files
 COPY configs/ ./configs/
 
 # ============================================================================
@@ -47,11 +63,21 @@ FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies only (smaller image)
+# Install runtime dependencies including Python 3.12
 RUN apt-get update && apt-get install -y \
     curl \
     libsndfile1 \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
 # Create non-root user for security BEFORE copying files
 RUN groupadd -r orchestrator && useradd -r -g orchestrator -u 1000 orchestrator
@@ -66,18 +92,22 @@ RUN mkdir -p /home/orchestrator/.cache/uv \
 # Set working directory
 WORKDIR /app
 
-# Copy uv from builder (with proper ownership)
-COPY --from=builder --chown=orchestrator:orchestrator /root/.local/bin/uv /usr/local/bin/uv
-COPY --from=builder --chown=orchestrator:orchestrator /root/.local/share/uv /root/.local/share/uv
+# Copy workspace structure from builder (with proper ownership)
+COPY --from=builder --chown=orchestrator:orchestrator /app/pyproject.toml /app/uv.lock ./
+COPY --from=builder --chown=orchestrator:orchestrator /app/packages /app/packages
+COPY --from=builder --chown=orchestrator:orchestrator /app/configs /app/configs
 
-# Copy application and dependencies from builder (with proper ownership)
-COPY --from=builder --chown=orchestrator:orchestrator /app /app
+# Copy installed Python packages from builder
+COPY --from=builder --chown=orchestrator:orchestrator /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 
 # Set environment variables for cache directories
 ENV UV_CACHE_DIR=/home/orchestrator/.cache/uv
 ENV HF_HOME=/home/orchestrator/.cache/huggingface
 ENV TORCH_HOME=/home/orchestrator/.cache/torch
 ENV MFA_CACHE=/home/orchestrator/.cache/mfa
+
+# Add packages to PYTHONPATH for editable installs
+ENV PYTHONPATH="/app/packages/proto/src:/app/packages/common/src:/app/packages/tts-base/src:/app/packages/orchestrator/src:${PYTHONPATH}"
 
 # Switch to non-root user
 USER orchestrator
@@ -89,5 +119,5 @@ EXPOSE 8080 8081
 HEALTHCHECK --interval=30s --timeout=10s --start-period=150s --retries=3 \
     CMD curl -f http://localhost:8081/health || exit 1
 
-# Default command
-CMD ["uv", "run", "python", "-m", "src.orchestrator.server", "--config", "configs/orchestrator.yaml"]
+# Default command - run orchestrator module directly with Python
+CMD ["python3", "-m", "orchestrator.server", "--config", "configs/orchestrator.yaml"]
