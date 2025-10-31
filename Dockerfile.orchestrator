@@ -97,8 +97,11 @@ COPY --from=builder --chown=orchestrator:orchestrator /app/pyproject.toml /app/u
 COPY --from=builder --chown=orchestrator:orchestrator /app/packages /app/packages
 COPY --from=builder --chown=orchestrator:orchestrator /app/configs /app/configs
 
-# Copy installed Python packages from builder
-COPY --from=builder --chown=orchestrator:orchestrator /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+# Copy .venv from builder (contains all installed packages)
+COPY --from=builder --chown=orchestrator:orchestrator /app/.venv /app/.venv
+
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Set environment variables for cache directories
 ENV UV_CACHE_DIR=/home/orchestrator/.cache/uv
