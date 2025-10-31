@@ -3,7 +3,7 @@
 name = "tts-base"
 version = "0.1.0"
 description = "TTS base classes, model manager, and shared audio utilities"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     # Workspace packages
     "proto",

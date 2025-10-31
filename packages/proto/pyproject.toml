@@ -3,7 +3,7 @@
 name = "proto"
 version = "0.1.0"
 description = "gRPC protocol definitions for TTS streaming"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "grpcio>=1.60.0",
     "grpcio-tools>=1.60.0",
