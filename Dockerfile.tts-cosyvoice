@@ -104,10 +104,12 @@ RUN touch packages/proto/src/__init__.py && \
     touch packages/proto/src/rpc/generated/__init__.py
 
 # Install workspace packages manually (avoiding uv sync due to protobuf conflict)
-# Use pip install -e for editable installs
-RUN cd packages/common && pip3 install -e . && \
-    cd ../tts-base && pip3 install -e . && \
-    cd ../tts-cosyvoice && pip3 install -e .
+# Skip proto package (protobuf 5.x conflicts with CosyVoice's protobuf 4.24.4)
+# tts-base depends on proto, so install without dependencies first
+RUN cd packages/common && pip3 install --no-deps -e . && \
+    cd ../tts-base && pip3 install --no-deps -e . && \
+    cd ../tts-cosyvoice && pip3 install --no-deps -e . && \
+    pip3 install -e packages/common -e packages/tts-base -e packages/tts-cosyvoice
 
 # Copy config files
 COPY configs/ ./configs/
