@@ -46,11 +46,11 @@ COPY packages/common/ ./packages/common/
 COPY packages/tts-base/ ./packages/tts-base/
 COPY packages/tts-piper/ ./packages/tts-piper/
 
-# Install Python dependencies with cache mount (BuildKit optimization)
-# Use --system to install into system Python (container-only pattern)
+# Create virtual environment and install dependencies (BuildKit optimization)
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
-    uv pip install --system -e packages/proto -e packages/common -e packages/tts-base -e packages/tts-piper
+    uv venv && \
+    uv pip install -e packages/proto -e packages/common -e packages/tts-base -e packages/tts-piper
 
 # Copy config files
 COPY configs/ ./configs/
