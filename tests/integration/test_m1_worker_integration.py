@@ -38,8 +38,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from src.orchestrator.grpc_client import TTSWorkerClient
-from src.rpc.generated import tts_pb2
+from orchestrator.grpc_client import TTSWorkerClient
+from rpc.generated import tts_pb2
 from tests.integration.test_utils import skip_if_grpc_unsafe
 
 logger = logging.getLogger(__name__)

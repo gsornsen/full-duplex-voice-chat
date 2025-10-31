@@ -21,8 +21,8 @@ import time
 import numpy as np
 import pytest
 
-from src.orchestrator.config import VADConfig
-from src.orchestrator.vad import VADProcessor
+from orchestrator.config import VADConfig
+from orchestrator.vad import VADProcessor
 from tests.integration.conftest import generate_silence, generate_speech_audio
 
 logger = logging.getLogger(__name__)

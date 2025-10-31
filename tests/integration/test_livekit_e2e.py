@@ -216,7 +216,7 @@ async def test_livekit_graceful_degradation() -> None:
     """
     # This should work without LiveKit container
 
-    from src.orchestrator.config import (
+    from orchestrator.config import (
         LiveKitConfig,
         OrchestratorConfig,
         TransportConfig,

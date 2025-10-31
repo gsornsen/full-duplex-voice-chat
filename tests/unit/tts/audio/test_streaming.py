@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from src.tts.audio.streaming import FrameBuffer, StreamingResampler
+from tts.audio.streaming import FrameBuffer, StreamingResampler
 
 
 class TestStreamingResampler:

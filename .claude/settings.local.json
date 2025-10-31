@@ -71,7 +71,10 @@
       "Bash(gh pr view:*)",
       "Bash(gh run list:*)",
       "Bash(GRPC_TESTS_ENABLED=1 uv run pytest:*)",
-      "Bash(tr:*)"
+      "Bash(tr:*)",
+      "Bash(gh pr list:*)",
+      "Bash(git cherry-pick:*)",
+      "mcp__RedisMCPServer__scan_all_keys"
     ],
     "deny": [],
     "ask": []

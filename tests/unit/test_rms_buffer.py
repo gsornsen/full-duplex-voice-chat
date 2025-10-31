@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from src.orchestrator.audio.buffer import RMSBuffer
+from orchestrator.audio.buffer import RMSBuffer
 
 
 class TestRMSBufferInit:

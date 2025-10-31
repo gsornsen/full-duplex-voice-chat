@@ -23,7 +23,7 @@ import time
 
 import pytest
 
-from src.orchestrator.transcript_buffer import TranscriptBuffer, TranscriptEntry
+from orchestrator.transcript_buffer import TranscriptBuffer, TranscriptEntry
 
 
 @pytest.fixture

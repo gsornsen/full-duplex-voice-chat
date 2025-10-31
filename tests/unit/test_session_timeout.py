@@ -14,7 +14,7 @@ Coverage:
 import pytest
 from pydantic import ValidationError
 
-from src.orchestrator.config import SessionConfig
+from orchestrator.config import SessionConfig
 
 
 class TestSessionConfigInit:

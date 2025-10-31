@@ -1,46 +1,25 @@
+# Workspace Root Configuration
 [project]
-name = "realtime-duplex-voice"
+name = "realtime-duplex-voice-chat"
 version = "0.1.0"
-description = "Realtime duplex voice chat system with barge-in support"
+description = "Full duplex voice chat system with barge-in support - workspace root"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = [
-    "aiortc>=1.9.0",
-    "websockets>=12.0",
-    "livekit>=0.6.0",
-    "livekit-agents>=0.10.0",
-    "pydantic>=2.0.0",
-    "grpcio>=1.60.0",
-    "grpcio-tools>=1.60.0",
-    "protobuf>=4.25.0",
-    "redis>=5.0.0",
-    "numpy>=1.26.0",
-    "scipy>=1.11.0",
-    "sounddevice>=0.4.6",
-    "soundfile>=0.12.0",
-    "webrtcvad>=2.0.0",
-    "torch>=2.7.0",
-    "torchaudio>=2.7.0",
-    "transformers>=4.40.0",
-    "accelerate>=0.30.0",
-    "peft>=0.10.0",
-    "huggingface-hub>=0.20.0",
-    "openai-whisper>=20240930",
-    "faster-whisper>=1.0.0",
-    "watchfiles>=0.21.0",
-    "pyyaml>=6.0.0",
-    "livekit-api>=0.6.0",
-    "aiohttp>=3.9.0",
-    "python-dotenv>=1.0.0",
-    "piper-tts>=1.2.0",
-    "onnxruntime>=1.16.0",
-    "livekit-plugins-openai>=0.8.0",
-    "livekit-plugins-silero>=0.7.0",
-    "modelscope>=1.31.0",
+
+# Root package has NO runtime dependencies
+# This allows independent installations of service packages
+
+[tool.uv.workspace]
+members = [
+    "packages/proto",
+    "packages/common",
+    "packages/tts-base",
+    # Orchestrator and TTS adapters are NOT workspace members
+    # They can be installed independently with their own dependencies
 ]
 
-[project.optional-dependencies]
-dev = [
+[tool.uv]
+dev-dependencies = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-timeout>=2.2.0",
@@ -54,17 +33,13 @@ dev = [
     "honcho>=1.1.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+# NO build-system section - this is a virtual package (workspace root only)
+# Individual packages have their own build-system configurations
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["src/rpc/generated"]
+exclude = ["src/rpc/generated", "packages/proto/src/rpc/generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S"]
@@ -88,6 +63,7 @@ warn_unused_ignores = true
 # Exclude generated code and test files with pre-existing type issues
 exclude = [
     "src/rpc/generated",
+    "packages/proto/src/rpc/generated",
     "tests/unit/orchestrator/test_parallel_tts.py",
     "tests/integration/test_parallel_synthesis.py",
     "tests/performance/test_parallel_tts_latency.py",
@@ -120,9 +96,10 @@ markers = [
 
 [tool.coverage.run]
 relative_files = true
-source = ["src"]
+source = ["src", "packages"]
 omit = [
     "src/rpc/generated/*",
+    "packages/proto/src/rpc/generated/*",
     "tests/*",
     "*/__init__.py",
 ]

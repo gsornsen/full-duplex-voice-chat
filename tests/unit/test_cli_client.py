@@ -10,7 +10,7 @@ import pytest
 import websockets
 
 from src.client.cli_client import AudioPlayer, CLIClient
-from src.orchestrator.transport.websocket_protocol import (
+from orchestrator.transport.websocket_protocol import (
     AudioMessage,
     ErrorMessage,
     SessionEndMessage,

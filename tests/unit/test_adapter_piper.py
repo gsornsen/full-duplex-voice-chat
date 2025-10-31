@@ -13,14 +13,14 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from src.tts.adapters.adapter_piper import (
+from tts.adapters.adapter_piper import (
     SAMPLES_PER_FRAME,
     TARGET_SAMPLE_RATE_HZ,
     PiperTTSAdapter,
 )
-from src.tts.audio.framing import repacketize_to_20ms
-from src.tts.audio.resampling import resample_audio
-from src.tts.tts_base import AdapterState
+from tts.audio.framing import repacketize_to_20ms
+from tts.audio.resampling import resample_audio
+from tts.tts_base import AdapterState
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ async def test_adapter_initialization_success(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test successful adapter initialization."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -154,7 +154,7 @@ async def test_synthesize_single_chunk(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -190,7 +190,7 @@ async def test_synthesize_multiple_chunks(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -220,7 +220,7 @@ async def test_synthesize_empty_audio(
     # Mock Piper to return empty audio
     mock_piper_voice.synthesize.return_value = []
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -354,7 +354,7 @@ async def test_control_pause_during_synthesis(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -413,7 +413,7 @@ async def test_control_resume_after_pause(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -464,7 +464,7 @@ async def test_control_stop_terminates_synthesis(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -504,7 +504,7 @@ async def test_control_invalid_command_raises_error(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test invalid control command raises ValueError."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -522,7 +522,7 @@ async def test_control_pause_when_idle_ignored(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test PAUSE when IDLE is ignored gracefully."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -543,7 +543,7 @@ async def test_control_resume_when_not_paused_ignored(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test RESUME when not paused is ignored gracefully."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -575,7 +575,7 @@ async def test_warmup_completes_quickly(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -607,7 +607,7 @@ async def test_rtf_calculation_realistic(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -647,7 +647,7 @@ async def test_load_model_logs_correctly(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test load_model logs correctly (simplified for M5)."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -668,7 +668,7 @@ async def test_unload_model_logs_correctly(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test unload_model logs correctly (simplified for M5)."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -694,7 +694,7 @@ async def test_get_state_returns_current_state(
     mock_voicepack_dir: Path, mock_piper_voice: Mock
 ) -> None:
     """Test get_state returns current adapter state."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(
@@ -732,7 +732,7 @@ async def test_get_state_returns_current_state(
 @pytest.mark.asyncio
 async def test_reset_clears_state(mock_voicepack_dir: Path, mock_piper_voice: Mock) -> None:
     """Test reset clears adapter state."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         adapter = PiperTTSAdapter(

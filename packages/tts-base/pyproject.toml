@@ -1,0 +1,34 @@
+# TTS Base Package - Base Classes and Model Manager
+[project]
+name = "tts-base"
+version = "0.1.0"
+description = "TTS base classes, model manager, and shared audio utilities"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Workspace packages
+    "proto",
+    "common",
+
+    # No PyTorch dependency - this is adapter-agnostic
+    # Individual adapters add their own inference dependencies
+
+    # Audio processing (shared across all adapters)
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "soundfile>=0.12.0",
+
+    # gRPC server
+    "grpcio>=1.60.0",
+    "protobuf>=5.0.0",
+]
+
+[tool.uv.sources]
+proto = { workspace = true }
+common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tts"]

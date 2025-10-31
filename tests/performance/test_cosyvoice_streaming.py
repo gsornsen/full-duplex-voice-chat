@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
 
 # Performance test markers
 pytestmark = [
@@ -88,7 +88,7 @@ def streaming_adapter(
     mock_model_path: Path, mock_cosyvoice_streaming_class: Mock
 ) -> CosyVoiceAdapter:
     """Create CosyVoiceAdapter instance configured for streaming mode testing."""
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="NVIDIA RTX 4090",
@@ -339,7 +339,7 @@ class TestStreamingVsBatch:
         test_text = "Comparison test sentence."
 
         # Test batch mode (stream=False)
-        with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+        with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
             with patch(
                 "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
                 return_value="NVIDIA RTX 4090",
@@ -350,7 +350,7 @@ class TestStreamingVsBatch:
                 batch_mock.inference_zero_shot.return_value = [{"tts_speech": batch_audio}]
                 batch_class = Mock(return_value=batch_mock)
 
-                with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", batch_class):
+                with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", batch_class):
                     batch_adapter = CosyVoiceAdapter("batch-model", mock_model_path)
 
                     async def text_gen_batch() -> AsyncIterator[str]:
@@ -366,7 +366,7 @@ class TestStreamingVsBatch:
                             break
 
         # Test streaming mode (stream=True)
-        with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+        with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
             with patch(
                 "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
                 return_value="NVIDIA RTX 4090",

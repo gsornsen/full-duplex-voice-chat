@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from src.orchestrator.config import VADConfig
+from orchestrator.config import VADConfig
 
 logger = logging.getLogger(__name__)
 

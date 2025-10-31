@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.orchestrator.config import (
+from orchestrator.config import (
     LiveKitConfig,
     OrchestratorConfig,
     RedisConfig,

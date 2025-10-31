@@ -27,8 +27,8 @@ import numpy as np
 import pytest
 import torch
 
-from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
-from src.tts.tts_base import AdapterState
+from tts.adapters.cosyvoice.adapter import CosyVoiceAdapter
+from tts.tts_base import AdapterState
 
 
 @pytest.fixture
@@ -81,12 +81,12 @@ def adapter(mock_model_path: Path, mock_cosyvoice_class: Mock) -> CosyVoiceAdapt
     Returns:
         CosyVoiceAdapter instance ready for testing
     """
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="Mock GPU",
         ):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
                 adapter = CosyVoiceAdapter("test-model", mock_model_path)
                 return adapter
 
@@ -98,12 +98,12 @@ def adapter(mock_model_path: Path, mock_cosyvoice_class: Mock) -> CosyVoiceAdapt
 
 def test_init_with_cuda_available(mock_model_path: Path, mock_cosyvoice_class: Mock) -> None:
     """Test adapter initialization when CUDA is available."""
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="NVIDIA RTX 4090",
         ):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
                 adapter = CosyVoiceAdapter("test-model", mock_model_path)
 
                 assert adapter.model_id == "test-model"
@@ -119,8 +119,8 @@ def test_init_without_cuda_falls_back_to_cpu(
     mock_model_path: Path, mock_cosyvoice_class: Mock
 ) -> None:
     """Test adapter initialization falls back to CPU when CUDA is not available."""
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=False):
-        with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=False):
+        with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
             adapter = CosyVoiceAdapter("test-model", mock_model_path)
 
             # Should fall back to CPU, not raise error
@@ -130,12 +130,12 @@ def test_init_without_cuda_falls_back_to_cpu(
 
 def test_init_without_cosyvoice_raises_import_error(mock_model_path: Path) -> None:
     """Test adapter initialization fails when CosyVoice2 is not installed."""
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="Mock GPU",
         ):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", None):
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", None):
                 with pytest.raises(ImportError, match="CosyVoice2 package not installed"):
                     CosyVoiceAdapter("test-model", mock_model_path)
 
@@ -149,12 +149,12 @@ def test_init_with_string_path(tmp_path: Path, mock_cosyvoice_class: Mock) -> No
     for filename in ["cosyvoice.yaml", "llm.pt", "flow.pt", "hift.pt"]:
         (model_path / filename).touch()
 
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="Mock GPU",
         ):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
                 adapter = CosyVoiceAdapter("test-model", str(model_path))
                 assert adapter.model_path == model_path
 
@@ -163,7 +163,7 @@ def test_init_calls_cosyvoice_constructor_with_correct_params(
     mock_model_path: Path, mock_cosyvoice_class: Mock
 ) -> None:
     """Test adapter initialization calls CosyVoice2 constructor with correct parameters."""
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="Mock GPU",
@@ -435,7 +435,7 @@ async def test_synthesize_stream_resamples_audio(adapter: CosyVoiceAdapter) -> N
     # Mock audio at native sample rate (24kHz)
     mock_audio = np.zeros(24000, dtype=np.int16)
 
-    with patch("src.tts.adapters.adapter_cosyvoice.resample_audio") as mock_resample:
+    with patch("tts.adapters.adapter_cosyvoice.resample_audio") as mock_resample:
         mock_resample.return_value = np.zeros(48000, dtype=np.int16)  # Resampled to 48kHz
 
         with patch.object(adapter, "_synthesize_cosyvoice", return_value=mock_audio):
@@ -459,7 +459,7 @@ async def test_synthesize_stream_skips_resampling_if_same_rate(adapter: CosyVoic
     adapter.native_sample_rate = 48000
     mock_audio = np.zeros(48000, dtype=np.int16)
 
-    with patch("src.tts.adapters.adapter_cosyvoice.resample_audio") as mock_resample:
+    with patch("tts.adapters.adapter_cosyvoice.resample_audio") as mock_resample:
         with patch.object(adapter, "_synthesize_cosyvoice", return_value=mock_audio):
 
             async def text_gen() -> AsyncIterator[str]:
@@ -496,7 +496,7 @@ async def test_warm_up_logs_gpu_memory_telemetry(adapter: CosyVoiceAdapter) -> N
     mock_audio = np.zeros(24000, dtype=np.int16)
 
     with patch.object(adapter, "_synthesize_cosyvoice", return_value=mock_audio):
-        with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+        with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
             with patch(
                 "src.tts.adapters.adapter_cosyvoice.torch.cuda.memory_allocated",
                 return_value=1024 * 1024 * 100,
@@ -608,12 +608,12 @@ def test_synthesize_cosyvoice_raises_error_when_model_none(
 ) -> None:
     """Test _synthesize_cosyvoice() raises error when model is None."""
     # Create adapter with mocked model
-    with patch("src.tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
+    with patch("tts.adapters.adapter_cosyvoice.torch.cuda.is_available", return_value=True):
         with patch(
             "src.tts.adapters.adapter_cosyvoice.torch.cuda.get_device_name",
             return_value="Mock GPU",
         ):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", mock_cosyvoice_class):
                 adapter = CosyVoiceAdapter("test-model", mock_model_path)
                 adapter.model = None  # Explicitly set to None
 

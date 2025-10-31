@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
-from src.orchestrator.routing import Router, RoutingStrategy
+from orchestrator.registry import WorkerRegistration, WorkerRegistry
+from orchestrator.routing import Router, RoutingStrategy
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def sample_workers() -> Any:
 async def router_with_redis(mock_registry: Any) -> Any:
     """Create router with Redis support."""
     # Mock Redis connection
-    with patch("src.orchestrator.routing.aioredis") as mock_redis:
+    with patch("orchestrator.routing.aioredis") as mock_redis:
         mock_redis_instance = AsyncMock()
         mock_redis_instance.ping = AsyncMock()
         mock_redis_instance.get = AsyncMock(return_value=None)

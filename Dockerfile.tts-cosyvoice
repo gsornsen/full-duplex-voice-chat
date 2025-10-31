@@ -1,12 +1,15 @@
-# Dockerfile for CosyVoice 2 TTS Worker - Multi-stage build for production
+# syntax=docker/dockerfile:1.4
+# Dockerfile for CosyVoice 2 TTS Worker - Optimized multi-stage build
 #
 # This Dockerfile creates an isolated environment for CosyVoice 2 with PyTorch 2.3.1 + CUDA 12.1
 # to avoid version conflicts with the main project (PyTorch 2.7.0 + CUDA 12.8).
 #
 # Build: docker build -f Dockerfile.tts-cosyvoice -t tts-cosyvoice:latest .
-# Run: docker compose up tts-cosyvoice
+# Run: docker compose --profile cosyvoice up
 
-# Builder stage
+# ============================================================================
+# Builder Stage - Install dependencies and CosyVoice
+# ============================================================================
 FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04 AS builder
 
 # Avoid interactive prompts during package installation
@@ -37,19 +40,23 @@ WORKDIR /app
 RUN mkdir -p /root/.triton/autotune
 
 # Install uv for fast dependency management
-RUN pip3 install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir uv
 
 # Copy only dependency files first for better layer caching
 COPY pyproject.toml ./
 
 # Install PyTorch 2.3.1 with CUDA 12.1 support (CosyVoice requirement)
-RUN pip3 install --no-cache-dir \
+# Use cache mount to speed up rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir \
     torch==2.3.1 \
     torchaudio==2.3.1 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Install CosyVoice 2 dependencies (excluding modelscope - using huggingface_hub instead)
-RUN pip3 install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir \
     numpy==1.26.4 \
     scipy==1.13.0 \
     soundfile \
@@ -88,7 +95,9 @@ RUN sed -i \
   's/^import tts_pb2 as tts__pb2/from . import tts_pb2 as tts__pb2/' \
   src/rpc/generated/tts_pb2_grpc.py
 
-# Production stage
+# ============================================================================
+# Runtime Stage - Minimal production image
+# ============================================================================
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 # Avoid interactive prompts
@@ -107,26 +116,29 @@ RUN apt-get update && apt-get install -y \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
-# Create non-root user for security
+# Create non-root user for security BEFORE copying files
 RUN groupadd -r cosyvoice && useradd -r -g cosyvoice -u 1000 cosyvoice
 
-# Create Triton autotune directory
-RUN mkdir -p /root/.triton/autotune && chown -R cosyvoice:cosyvoice /root/.triton
+# Create directories with proper permissions BEFORE switching user
+RUN mkdir -p /root/.triton/autotune \
+    /home/cosyvoice/.cache/modelscope \
+    /home/cosyvoice/.cache/huggingface \
+    /home/cosyvoice/.cache/torch \
+    && chown -R cosyvoice:cosyvoice /root/.triton /home/cosyvoice
 
 # Set working directory
 WORKDIR /app
 
-# Copy Python dependencies from builder
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+# Copy Python dependencies from builder (with proper ownership)
+COPY --from=builder --chown=cosyvoice:cosyvoice /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 
-# Copy application from builder
-COPY --from=builder /app /app
+# Copy application from builder (with proper ownership)
+COPY --from=builder --chown=cosyvoice:cosyvoice /app /app
 
-# Fix permissions for non-root user
-RUN chown -R cosyvoice:cosyvoice /app
-
-# Switch to non-root user
-USER cosyvoice
+# Set environment variables for cache directories
+ENV MODELSCOPE_CACHE=/home/cosyvoice/.cache/modelscope
+ENV HF_HOME=/home/cosyvoice/.cache/huggingface
+ENV TORCH_HOME=/home/cosyvoice/.cache/torch
 
 # Add CosyVoice and Matcha-TTS to Python path
 ENV PYTHONPATH="/app/third_party/CosyVoice:/app/third_party/CosyVoice/third_party/Matcha-TTS:${PYTHONPATH}"
@@ -136,11 +148,11 @@ ENV PYTHONUNBUFFERED=1
 ENV CUDA_VISIBLE_DEVICES=0
 ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
-# Expose gRPC port
-EXPOSE 7001
+# Switch to non-root user
+USER cosyvoice
 
-# Expose metrics port
-EXPOSE 9091
+# Expose ports
+EXPOSE 7001 9091
 
 # Health check - test gRPC connectivity
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \

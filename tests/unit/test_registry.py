@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
+from orchestrator.registry import WorkerRegistration, WorkerRegistry
 
 
 # Test data fixtures
@@ -173,8 +173,8 @@ class TestWorkerRegistry:
         assert registry.connection_pool_size == 10
         assert registry._connected is False
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_registry_connect(
         self,
         mock_redis_class: MagicMock,
@@ -192,8 +192,8 @@ class TestWorkerRegistry:
         assert registry._connected is True
         mock_redis.ping.assert_awaited_once()
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_registry_connect_idempotent(
         self,
         mock_redis_class: MagicMock,
@@ -213,8 +213,8 @@ class TestWorkerRegistry:
         # Should only ping once
         assert mock_redis.ping.await_count == 1
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_registry_connect_failure(
         self,
         mock_redis_class: MagicMock,
@@ -233,8 +233,8 @@ class TestWorkerRegistry:
 
         assert registry._connected is False
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_registry_disconnect(
         self,
         mock_redis_class: MagicMock,
@@ -262,8 +262,8 @@ class TestWorkerRegistry:
         await registry.disconnect()
         await registry.disconnect()
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_health_check_healthy(
         self,
         mock_redis_class: MagicMock,
@@ -287,8 +287,8 @@ class TestWorkerRegistry:
         is_healthy = await registry.health_check()
         assert is_healthy is False
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_health_check_failed(
         self,
         mock_redis_class: MagicMock,
@@ -310,8 +310,8 @@ class TestWorkerRegistry:
         is_healthy = await registry.health_check()
         assert is_healthy is False
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     @patch("time.time")
     async def test_register_worker(
         self,
@@ -341,8 +341,8 @@ class TestWorkerRegistry:
         # Verify heartbeat timestamp was updated
         assert sample_worker_registration.last_heartbeat_ts == 12345.0
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_register_worker_custom_ttl(
         self,
         mock_redis_class: MagicMock,
@@ -372,8 +372,8 @@ class TestWorkerRegistry:
         with pytest.raises(ConnectionError, match="Redis not connected"):
             await registry.register_worker(sample_worker_registration)
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_workers_empty(
         self,
         mock_redis_class: MagicMock,
@@ -393,8 +393,8 @@ class TestWorkerRegistry:
         assert workers == []
         mock_redis.keys.assert_awaited_once_with("worker:*")
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_workers_single(
         self,
         mock_redis_class: MagicMock,
@@ -417,8 +417,8 @@ class TestWorkerRegistry:
         assert workers[0].name == "tts-mock@0"
         assert workers[0].addr == "grpc://localhost:7001"
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_workers_multiple(
         self,
         mock_redis_class: MagicMock,
@@ -451,8 +451,8 @@ class TestWorkerRegistry:
         assert "tts-mock@0" in worker_names
         assert "tts-cosyvoice2@0" in worker_names
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_workers_invalid_data(
         self,
         mock_redis_class: MagicMock,
@@ -478,8 +478,8 @@ class TestWorkerRegistry:
         with pytest.raises(ConnectionError, match="Redis not connected"):
             await registry.get_workers()
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_worker_by_name_found(
         self,
         mock_redis_class: MagicMock,
@@ -502,8 +502,8 @@ class TestWorkerRegistry:
         assert worker.addr == "grpc://localhost:7001"
         mock_redis.get.assert_awaited_once_with("worker:tts-mock@0")
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_worker_by_name_not_found(
         self,
         mock_redis_class: MagicMock,
@@ -522,8 +522,8 @@ class TestWorkerRegistry:
 
         assert worker is None
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_get_worker_by_name_invalid_data(
         self,
         mock_redis_class: MagicMock,
@@ -550,8 +550,8 @@ class TestWorkerRegistry:
         with pytest.raises(ConnectionError, match="Redis not connected"):
             await registry.get_worker_by_name("test")
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_remove_worker_found(
         self,
         mock_redis_class: MagicMock,
@@ -570,8 +570,8 @@ class TestWorkerRegistry:
 
         mock_redis.delete.assert_awaited_once_with("worker:tts-mock@0")
 
-    @patch("src.orchestrator.registry.ConnectionPool")
-    @patch("src.orchestrator.registry.aioredis.Redis")
+    @patch("orchestrator.registry.ConnectionPool")
+    @patch("orchestrator.registry.aioredis.Redis")
     async def test_remove_worker_not_found(
         self,
         mock_redis_class: MagicMock,

@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.orchestrator.dual_llm import (
+from orchestrator.dual_llm import (
     DualLLMOrchestrator,
     LLMResponse,
     ResponsePhase,
@@ -43,7 +43,7 @@ def mock_openai_client() -> AsyncMock:
 @pytest.fixture
 def orchestrator(mock_openai_client: AsyncMock) -> DualLLMOrchestrator:
     """Create DualLLMOrchestrator with mocked OpenAI client."""
-    with patch("src.orchestrator.dual_llm.AsyncOpenAI", return_value=mock_openai_client):
+    with patch("orchestrator.dual_llm.AsyncOpenAI", return_value=mock_openai_client):
         return DualLLMOrchestrator(
             openai_api_key="sk-test-key-123",
             filler_enabled=True,
@@ -53,7 +53,7 @@ def orchestrator(mock_openai_client: AsyncMock) -> DualLLMOrchestrator:
 @pytest.fixture
 def orchestrator_no_filler(mock_openai_client: AsyncMock) -> DualLLMOrchestrator:
     """Create DualLLMOrchestrator with fillers disabled."""
-    with patch("src.orchestrator.dual_llm.AsyncOpenAI", return_value=mock_openai_client):
+    with patch("orchestrator.dual_llm.AsyncOpenAI", return_value=mock_openai_client):
         return DualLLMOrchestrator(
             openai_api_key="sk-test-key-123",
             filler_enabled=False,
@@ -65,7 +65,7 @@ class TestInitialization:
 
     def test_init_with_valid_api_key(self) -> None:
         """Test initialization with valid API key."""
-        with patch("src.orchestrator.dual_llm.AsyncOpenAI"):
+        with patch("orchestrator.dual_llm.AsyncOpenAI"):
             orchestrator = DualLLMOrchestrator(openai_api_key="sk-valid-key")
             assert orchestrator.filler_enabled is True
             assert orchestrator.full_model == "gpt-4o-mini"
@@ -74,7 +74,7 @@ class TestInitialization:
 
     def test_init_with_custom_config(self) -> None:
         """Test initialization with custom configuration."""
-        with patch("src.orchestrator.dual_llm.AsyncOpenAI"):
+        with patch("orchestrator.dual_llm.AsyncOpenAI"):
             orchestrator = DualLLMOrchestrator(
                 openai_api_key="sk-valid-key",
                 fast_model="gpt-3.5-turbo",

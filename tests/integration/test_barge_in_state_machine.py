@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from src.orchestrator.session import VALID_TRANSITIONS, SessionManager, SessionState
-from src.orchestrator.transport.base import TransportSession
+from orchestrator.session import VALID_TRANSITIONS, SessionManager, SessionState
+from orchestrator.transport.base import TransportSession
 
 logger = logging.getLogger(__name__)
 

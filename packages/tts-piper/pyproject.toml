@@ -1,0 +1,35 @@
+# TTS Piper Package - CPU-based TTS with ONNX Runtime
+[project]
+name = "tts-piper"
+version = "0.1.0"
+description = "Piper TTS adapter for CPU-based neural speech synthesis"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Workspace packages (via path dependencies)
+    "proto",
+    "common",
+    "tts-base",
+
+    # Piper TTS (CPU only - ONNX Runtime)
+    "piper-tts>=1.2.0",
+    "onnxruntime>=1.16.0",
+
+    # No PyTorch needed - Piper uses ONNX Runtime
+
+    # Audio processing (inherited from tts-base but explicit here)
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+]
+
+[tool.uv.sources]
+# Reference packages from the workspace
+proto = { path = "../proto", editable = true }
+common = { path = "../common", editable = true }
+tts-base = { path = "../tts-base", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tts/adapters/piper"]

@@ -7,7 +7,7 @@ and the complete processing pipeline.
 import numpy as np
 import pytest
 
-from src.tts.audio.processing import (
+from tts.audio.processing import (
     apply_dither,
     apply_fade,
     crossfade_buffers,

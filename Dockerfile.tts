@@ -1,4 +1,9 @@
-# TTS Worker Dockerfile - Multi-stage build for production
+# syntax=docker/dockerfile:1.4
+# TTS Worker Dockerfile - Optimized multi-stage build with BuildKit caching
+
+# ============================================================================
+# Builder Stage - Compile dependencies
+# ============================================================================
 FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04 AS builder
 
 # Prevent interactive prompts during build
@@ -12,26 +17,31 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv and set PATH
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    export PATH="/root/.local/bin:$PATH" && \
-    uv --version
+# Install uv (fast Python package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Set PATH for runtime
+# Set PATH for uv
 ENV PATH="/root/.local/bin:$PATH"
 
 # Set working directory
 WORKDIR /app
 
-# Copy project files
+# Copy dependency files first (better layer caching)
 COPY pyproject.toml uv.lock README.md ./
+
+# Install Python dependencies with cache mount (BuildKit optimization)
+# This dramatically speeds up rebuilds by caching downloaded packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    uv sync --frozen
+
+# Copy application code (changes frequently, so do this last)
 COPY src/ ./src/
 COPY configs/ ./configs/
 
-# Install Python dependencies
-RUN export PATH="/root/.local/bin:$PATH" && uv sync --frozen
-
-# Production stage
+# ============================================================================
+# Runtime Stage - Minimal production image
+# ============================================================================
 FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 # Prevent interactive prompts
@@ -43,30 +53,36 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for security
+# Create non-root user for security BEFORE copying files
 RUN groupadd -r ttsworker && useradd -r -g ttsworker -u 1000 ttsworker
+
+# Create directories with proper permissions BEFORE switching user
+RUN mkdir -p /home/ttsworker/.cache/uv \
+    /home/ttsworker/.cache/huggingface \
+    /home/ttsworker/.cache/torch \
+    /app/voicepacks \
+    && chown -R ttsworker:ttsworker /home/ttsworker /app
 
 # Set working directory
 WORKDIR /app
 
-# Copy uv from builder
-COPY --from=builder /root/.local/bin/uv /usr/local/bin/uv
-COPY --from=builder /root/.local/share/uv /root/.local/share/uv
+# Copy uv from builder (with proper ownership)
+COPY --from=builder --chown=ttsworker:ttsworker /root/.local/bin/uv /usr/local/bin/uv
+COPY --from=builder --chown=ttsworker:ttsworker /root/.local/share/uv /root/.local/share/uv
 
-# Copy application and dependencies from builder
-COPY --from=builder /app /app
+# Copy application and dependencies from builder (with proper ownership)
+COPY --from=builder --chown=ttsworker:ttsworker /app /app
 
-# Create voicepacks directory with proper permissions
-RUN mkdir -p voicepacks && chown -R ttsworker:ttsworker /app
+# Set environment variables for cache directories
+ENV UV_CACHE_DIR=/home/ttsworker/.cache/uv
+ENV HF_HOME=/home/ttsworker/.cache/huggingface
+ENV TORCH_HOME=/home/ttsworker/.cache/torch
 
 # Switch to non-root user
 USER ttsworker
 
-# Expose gRPC port
-EXPOSE 7001
-
-# Expose metrics port
-EXPOSE 9090
+# Expose ports
+EXPOSE 7001 9090
 
 # Health check - test gRPC connectivity
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

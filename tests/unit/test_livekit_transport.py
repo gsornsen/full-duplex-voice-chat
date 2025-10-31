@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from livekit import rtc
 
-from src.orchestrator.config import LiveKitConfig
-from src.orchestrator.livekit_utils.room_manager import LiveKitRoomManager
-from src.orchestrator.transport.livekit_transport import (
+from orchestrator.config import LiveKitConfig
+from orchestrator.livekit_utils.room_manager import LiveKitRoomManager
+from orchestrator.transport.livekit_transport import (
     LiveKitSession,
     LiveKitTransport,
 )
@@ -115,7 +115,7 @@ class TestLiveKitSession:
     async def test_initialize_audio_track(self, livekit_session: LiveKitSession) -> None:
         """Test audio track initialization."""
         with (
-            patch("src.orchestrator.transport.livekit_transport.rtc.AudioSource") as mock_source,
+            patch("orchestrator.transport.livekit_transport.rtc.AudioSource") as mock_source,
             patch(
                 "src.orchestrator.transport.livekit_transport.rtc.LocalAudioTrack"
             ) as mock_track_class,
@@ -168,10 +168,10 @@ class TestLiveKitSession:
     async def test_send_audio_frame_success(self, livekit_session: LiveKitSession) -> None:
         """Test sending valid audio frame."""
         with (
-            patch("src.orchestrator.transport.livekit_transport.rtc.AudioFrame") as mock_frame_class, # noqa: E501
-            patch("src.orchestrator.transport.livekit_transport.np.frombuffer") as mock_frombuffer,
-            patch("src.orchestrator.transport.livekit_transport.np.copyto"),
-            patch("src.orchestrator.transport.livekit_transport.np.asarray"),
+            patch("orchestrator.transport.livekit_transport.rtc.AudioFrame") as mock_frame_class, # noqa: E501
+            patch("orchestrator.transport.livekit_transport.np.frombuffer") as mock_frombuffer,
+            patch("orchestrator.transport.livekit_transport.np.copyto"),
+            patch("orchestrator.transport.livekit_transport.np.asarray"),
         ):
             # Setup mocks
             mock_audio_source = AsyncMock()

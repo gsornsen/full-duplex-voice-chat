@@ -14,7 +14,7 @@ import logging
 
 import pytest
 
-from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
+from orchestrator.registry import WorkerRegistration, WorkerRegistry
 
 logger = logging.getLogger(__name__)
 

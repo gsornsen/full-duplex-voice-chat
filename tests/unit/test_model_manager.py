@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from src.tts.model_manager import (
+from tts.model_manager import (
     ModelManager,
     ModelManagerError,
     ModelNotFoundError,

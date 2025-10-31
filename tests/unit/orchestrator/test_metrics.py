@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from src.orchestrator.metrics import (
+from orchestrator.metrics import (
     Counter,
     Gauge,
     Histogram,

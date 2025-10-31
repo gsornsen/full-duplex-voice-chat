@@ -3,7 +3,7 @@
 import pytest
 from pytest import MonkeyPatch
 
-from src.orchestrator.config_validator import ConfigurationError, ConfigValidator
+from orchestrator.config_validator import ConfigurationError, ConfigValidator
 
 
 def test_validate_tts_cosyvoice_configuration(monkeypatch: MonkeyPatch) -> None:

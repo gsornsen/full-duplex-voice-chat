@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.orchestrator.parallel_tts import (
+from orchestrator.parallel_tts import (
     AudioResult,
     OrderedPlayback,
     ParallelSynthesisPipeline,

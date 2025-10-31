@@ -19,10 +19,10 @@ import time
 import pytest
 from websockets.asyncio.client import ClientConnection
 
-from src.orchestrator.audio.resampler import create_vad_resampler
-from src.orchestrator.config import OrchestratorConfig, VADConfig
-from src.orchestrator.session import SessionMetrics
-from src.orchestrator.vad import VADProcessor
+from orchestrator.audio.resampler import create_vad_resampler
+from orchestrator.config import OrchestratorConfig, VADConfig
+from orchestrator.session import SessionMetrics
+from orchestrator.vad import VADProcessor
 from tests.helpers.vad_test_utils import (
     VADTestRecorder,
     generate_audio_sequence,

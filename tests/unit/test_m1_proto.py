@@ -6,7 +6,7 @@ and proper field encoding.
 """
 
 
-from src.rpc.generated import tts_pb2
+from rpc.generated import tts_pb2
 
 
 class TestTextChunk:

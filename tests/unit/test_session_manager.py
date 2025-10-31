@@ -9,8 +9,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from src.orchestrator.session import SessionManager, SessionMetrics, SessionState
-from src.orchestrator.transport.base import TransportSession
+from orchestrator.session import SessionManager, SessionMetrics, SessionState
+from orchestrator.transport.base import TransportSession
 
 
 class MockSession(TransportSession):

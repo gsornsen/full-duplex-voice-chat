@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from src.orchestrator.registry import WorkerRegistration
-from src.orchestrator.worker_selector import WorkerSelector
+from orchestrator.registry import WorkerRegistration
+from orchestrator.worker_selector import WorkerSelector
 
 
 @pytest.fixture

@@ -1,0 +1,59 @@
+# Orchestrator Package - WebRTC/WebSocket Server with LiveKit Agent
+# This is a standalone package that references workspace packages via path dependencies
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "Orchestrator for voice chat with LiveKit Agent and WebSocket fallback"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Workspace packages (via path dependencies)
+    "proto",
+    "common",
+    "tts-base",
+
+    # PyTorch 2.7.0 + CUDA 12.8 (latest)
+    "torch>=2.7.0",
+    "torchaudio>=2.7.0",
+
+    # Protobuf 5.x (latest, compatible with PyTorch 2.7.0)
+    "protobuf>=5.0.0",
+
+    # LiveKit and WebRTC
+    "livekit>=0.6.0",
+    "livekit-agents>=0.10.0",
+    "livekit-api>=0.6.0",
+    "openai>=1.0.0",
+    "livekit-plugins-openai>=0.8.0",
+    "livekit-plugins-silero>=0.7.0",
+    "aiortc>=1.9.0",
+    "websockets>=12.0",
+
+    # ASR (Whisper/WhisperX with GPU support)
+    "openai-whisper>=20240930",
+    "faster-whisper>=1.0.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.30.0",
+    "peft>=0.10.0",
+
+    # Audio processing
+    "webrtcvad>=2.0.0",
+    "sounddevice>=0.4.6",
+
+    # Utilities
+    "aiohttp>=3.9.0",
+    "watchfiles>=0.21.0",
+    "huggingface-hub>=0.20.0",
+]
+
+[tool.uv.sources]
+# Reference packages from the workspace
+proto = { path = "../proto", editable = true }
+common = { path = "../common", editable = true }
+tts-base = { path = "../tts-base", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator"]

@@ -35,8 +35,8 @@ import numpy as np
 import pytest
 import torch
 
-from src.tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
-from src.tts.tts_base import AdapterState
+from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+from tts.tts_base import AdapterState
 
 # Mark all tests in this module as infrastructure tests (skip in CI)
 pytestmark = pytest.mark.infrastructure
@@ -108,7 +108,7 @@ async def test_adapter_initialization_with_voicepack(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test CosyVoiceAdapter initializes successfully with voicepack."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -128,7 +128,7 @@ async def test_adapter_warmup_completes(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test adapter warmup completes successfully and logs telemetry."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 with patch("torch.cuda.memory_allocated", return_value=1024 * 1024 * 512):  # 512 MB
@@ -155,7 +155,7 @@ async def test_adapter_cleanup_releases_resources(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test adapter cleanup releases resources properly."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -183,7 +183,7 @@ async def test_synthesize_stream_end_to_end(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test complete synthesis flow from text to audio frames."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -216,7 +216,7 @@ async def test_synthesize_multiple_chunks_sequentially(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test synthesis processes multiple text chunks sequentially."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -253,7 +253,7 @@ async def test_synthesize_with_pause_resume_integration(
     3. RESUME command works (or is safely ignored if synthesis finished)
     4. All frames are eventually delivered
     """
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -308,7 +308,7 @@ async def test_synthesize_with_stop_mid_stream(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test synthesis terminates immediately on STOP command."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -342,7 +342,7 @@ async def test_output_frame_format_is_correct(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test output frames have correct format (960 samples, int16, 48kHz)."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -374,7 +374,7 @@ async def test_resampling_maintains_audio_quality(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test resampling from 24kHz to 48kHz maintains audio quality."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -414,7 +414,7 @@ async def test_control_latency_under_50ms(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test control commands respond within 50ms (SLA requirement)."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -472,7 +472,7 @@ async def test_frame_jitter_within_tolerance(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test frame delivery timing maintains consistent jitter."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -521,7 +521,7 @@ async def test_concurrent_sessions_sequential_behavior(
     This test verifies sequential behavior when sessions are run concurrently.
     In production, use separate adapter instances per session.
     """
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -562,7 +562,7 @@ async def test_graceful_failure_on_missing_voicepack(tmp_path: Path) -> None:
 
     with patch("torch.cuda.is_available", return_value=True):
         with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
-            with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2") as mock_cls:
+            with patch("tts.adapters.adapter_cosyvoice.CosyVoice2") as mock_cls:
                 # Simulate CosyVoice constructor failure
                 mock_cls.side_effect = FileNotFoundError("Model files not found")
 
@@ -579,7 +579,7 @@ async def test_synthesis_failure_raises_error(
     # Configure mock to raise error during inference
     mock_cosyvoice_model.inference_zero_shot.side_effect = RuntimeError("GPU out of memory")
 
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
@@ -605,7 +605,7 @@ async def test_gpu_memory_telemetry_logged(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test GPU memory telemetry is logged during warmup."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=True):
             with patch("torch.cuda.get_device_name", return_value="NVIDIA RTX 4090"):
                 with patch(
@@ -628,7 +628,7 @@ async def test_adapter_without_cuda_falls_back_gracefully(
     mock_voicepack_dir: Path, mock_cosyvoice_model: MagicMock
 ) -> None:
     """Test adapter falls back to CPU when CUDA is not available."""
-    with patch("src.tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
+    with patch("tts.adapters.adapter_cosyvoice.CosyVoice2", return_value=mock_cosyvoice_model):
         with patch("torch.cuda.is_available", return_value=False):
             adapter = CosyVoiceAdapter("test-model", mock_voicepack_dir)
 

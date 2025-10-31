@@ -12,21 +12,21 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from websockets.protocol import State
 
-from src.orchestrator.audio.packetizer import (
+from orchestrator.audio.packetizer import (
     EXPECTED_FRAME_SIZE_BYTES,
     AudioFramePacketizer,
     decode_pcm_frame,
     encode_pcm_frame,
     validate_frame_size,
 )
-from src.orchestrator.transport.websocket_protocol import (
+from orchestrator.transport.websocket_protocol import (
     AudioMessage,
     ErrorMessage,
     SessionEndMessage,
     SessionStartMessage,
     TextMessage,
 )
-from src.orchestrator.transport.websocket_transport import (
+from orchestrator.transport.websocket_transport import (
     WebSocketSession,
     WebSocketTransport,
 )

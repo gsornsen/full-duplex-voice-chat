@@ -14,8 +14,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from src.orchestrator.health import setup_health_routes
-from src.orchestrator.metrics import MetricsCollector, get_metrics_collector
+from orchestrator.health import setup_health_routes
+from orchestrator.metrics import MetricsCollector, get_metrics_collector
 
 
 @pytest.fixture

@@ -234,7 +234,7 @@ async def test_worker_registration_integration(
     - Routing resolves to correct worker
     - Worker capabilities are accessible
     """
-    from src.orchestrator.registry import WorkerRegistry
+    from orchestrator.registry import WorkerRegistry
 
     # Create registry
     registry = WorkerRegistry(
@@ -489,7 +489,7 @@ async def test_component_integration_health_checks(
     Note: This test uses gRPC directly and may segfault in WSL2 environments.
     Use `just test-integration` to run with process isolation.
     """
-    from src.orchestrator.registry import WorkerRegistry
+    from orchestrator.registry import WorkerRegistry
 
     # Test Redis health
     registry = WorkerRegistry(
@@ -511,7 +511,7 @@ async def test_component_integration_health_checks(
     # Test worker reachability
     import grpc
 
-    from src.rpc.generated import tts_pb2, tts_pb2_grpc
+    from rpc.generated import tts_pb2, tts_pb2_grpc
 
     mock_worker = next(
         (w for w in workers if w.name == registered_mock_worker.name), None

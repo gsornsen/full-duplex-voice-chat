@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from src.tts.audio.framing import repacketize_to_20ms
+from tts.audio.framing import repacketize_to_20ms
 
 
 # Fixtures for test data

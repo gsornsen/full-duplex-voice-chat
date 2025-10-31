@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from src.orchestrator.transport.base import Transport, TransportSession
+from orchestrator.transport.base import Transport, TransportSession
 
 
 class MockTransportSession(TransportSession):

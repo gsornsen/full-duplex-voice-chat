@@ -1,8 +1,36 @@
+# Unified Docker Compose Configuration
+# Supports multiple deployment profiles for different use cases
+#
+# PROFILES:
+#   - Default (no profile):      Infrastructure only (Redis, LiveKit, Caddy)
+#   - piper:                     + Orchestrator + Piper TTS (CPU)
+#   - cosyvoice:                 + Orchestrator + CosyVoice TTS (GPU)
+#   - web:                       + Next.js web frontend
+#   - monitoring:                + Prometheus + Grafana
+#   - full-stack:                All services (orchestrator + TTS + web + monitoring)
+#
+# USAGE:
+#   docker compose up -d                              # Infrastructure only
+#   docker compose --profile piper up -d              # Infrastructure + Piper
+#   docker compose --profile cosyvoice up -d          # Infrastructure + CosyVoice
+#   docker compose --profile full-stack up -d         # Everything
+#   docker compose --profile monitoring up -d         # Add monitoring to running stack
+#
+# QUICK START:
+#   just dev piper                                    # Development with Piper
+#   just dev cosyvoice                                # Development with CosyVoice
+#   FORCE_BUILD=true just dev piper                   # Force rebuild
+
 services:
-  # Redis for service discovery
+  # ============================================================================
+  # INFRASTRUCTURE (Always included - no profile required)
+  # ============================================================================
+
+  # Redis for service discovery and session state
   redis:
     image: redis:7-alpine
     container_name: redis-tts
+    restart: unless-stopped
     # No external port mapping - only accessible within Docker network
     # This prevents port conflicts with host Redis/Valkey instances
     # Services use internal DNS: redis:6379
@@ -15,25 +43,37 @@ services:
       start_period: 5s
     networks:
       - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   # LiveKit server for WebRTC transport
   livekit:
     image: livekit/livekit-server:latest
     container_name: livekit-server
+    restart: unless-stopped
     command: --config /etc/livekit.yaml
     ports:
-      - "7880:7880"   # WebRTC/WebSocket
-      - "7881:7881"   # RTC TCP port
-      - "7882:7882/udp" # TURN/UDP
-      - "50000-50099:50000-50099/udp"  # RTC port range (subset for Docker)
+      - "7880:7880"        # WebRTC/WebSocket
+      - "7881:7881"        # RTC TCP port
+      - "7882:7882/udp"    # TURN/UDP
+      - "50000-50099:50000-50099/udp"  # RTC port range
     volumes:
       - ./configs/livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
       interval: 10s
-      timeout: 3s
-      retries: 5
+      timeout: 5s
+      retries: 3
       start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - tts-network
 
@@ -41,10 +81,11 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: caddy-proxy
+    restart: unless-stopped
     ports:
-      - "8443:8443"    # HTTPS for web client
-      - "8444:8444"    # HTTPS for LiveKit WebSocket
-      - "80:80"        # HTTP (optional, for redirects)
+      - "80:80"          # HTTP (optional, for redirects)
+      - "8443:8443"      # HTTPS for web client
+      - "8444:8444"      # HTTPS for LiveKit WebSocket
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./voicechat.local+3.pem:/etc/caddy/voicechat.local+3.pem:ro
@@ -52,50 +93,53 @@ services:
       - caddy-data:/data
       - caddy-config:/config
       - caddy-logs:/var/log/caddy
-    depends_on:
-      livekit:
-        condition: service_healthy
     extra_hosts:
       # Allow Caddy to reach host machine (for Next.js on host:3000)
       - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
       interval: 10s
-      timeout: 3s
-      retries: 5
+      timeout: 5s
+      retries: 3
       start_period: 5s
+    depends_on:
+      livekit:
+        condition: service_healthy
     networks:
       - tts-network
-    restart: unless-stopped
 
-  # Orchestrator service - supports both LiveKit Agent and Legacy WebSocket modes
-  # Mode selection via ORCHESTRATOR_MODE environment variable:
-  #   - agent (default): LiveKit Agent mode for web frontend
-  #   - legacy: WebSocket server mode for CLI client
+  # ============================================================================
+  # ORCHESTRATOR (Profiles: piper, cosyvoice, full-stack)
+  # ============================================================================
+
   orchestrator:
+    profiles:
+      - piper
+      - cosyvoice
+      - full-stack
     build:
       context: .
       dockerfile: Dockerfile.orchestrator
+    image: full-duplex-voice-chat-orchestrator:latest
     container_name: orchestrator
-    # Use entrypoint script to select mode based on ORCHESTRATOR_MODE
+    restart: unless-stopped
     entrypoint: ["/app/docker/entrypoint-orchestrator.sh"]
-    # Graceful shutdown for LiveKit Agent worker deregistration
     stop_signal: SIGTERM
-    stop_grace_period: 90s  # Increased from 30s to match shutdown_process_timeout
+    stop_grace_period: 90s
     ports:
-      - "8080:8080"  # WebSocket (legacy mode only)
-      - "8081:8081"  # Health check HTTP (legacy mode only)
+      - "8080:8080"  # WebSocket (legacy mode)
+      - "8081:8081"  # Health/Metrics endpoint
     environment:
       # Orchestrator mode: agent (default) or legacy
       - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
-      # Use internal Docker DNS and correct Redis port (6379 inside container)
+      # Service discovery
       - REDIS_URL=redis://redis:6379
       - LIVEKIT_URL=ws://livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret1234567890abcdefghijklmn
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
       # ASR Configuration (WhisperX)
-      - ASR_ENABLED=true
-      - ASR_ADAPTER=whisperx
+      - ASR_ENABLED=${ASR_ENABLED:-true}
+      - ASR_ADAPTER=${ASR_ADAPTER:-whisperx}
       - ASR_DEVICE=${ASR_DEVICE:-auto}
       - ASR_MODEL_SIZE=${ASR_MODEL_SIZE:-small}
       - ASR_LANGUAGE=${ASR_LANGUAGE:-en}
@@ -105,38 +149,19 @@ services:
       - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
       - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
-      # Required for agent mode (OpenAI LLM integration)
+      # LLM Integration (optional)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Parallel Synthesis (eliminate gaps between sentences)
+      # Parallel Synthesis
       - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
       - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-2}
       - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-2}
-      # Continuation Detection (merge thinking pauses)
+      # Continuation Detection
       - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-false}
-      # Dual-LLM Configuration (currently disabled due to API compatibility)
+      # Dual-LLM Configuration
       - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
-    depends_on:
-      redis:
-        condition: service_healthy
-      livekit:
-        condition: service_healthy
-      # TTS worker dependency removed - orchestrator connects via network alias
-      # Either tts0 (piper profile) or tts-cosyvoice (cosyvoice profile) will provide the "tts" alias
-    healthcheck:
-      # Health check only works in legacy mode (agent mode doesn't expose HTTP endpoint)
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 0"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      # Increased from 10s to 150s to account for:
-      # - WhisperX model download (if not cached): ~10-15s
-      # - WhisperX model loading to GPU: ~15-20s
-      # - Pre-warming initialization: ~5s
-      # - Worker registration: ~5s
-      # - Buffer time for slow systems/network: ~95s
-      start_period: 150s
-    networks:
-      - tts-network
+      # Metrics
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_PORT=8081
     volumes:
       # Mount entrypoint script
       - ./docker/entrypoint-orchestrator.sh:/app/docker/entrypoint-orchestrator.sh:ro
@@ -146,70 +171,101 @@ services:
       - huggingface-cache:/root/.cache/huggingface
       - torch-cache:/root/.cache/torch
       - mfa-cache:/root/.cache/mfa
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              # count: 1
-              capabilities: [gpu]
-
-  # TTS Worker 0 (Default: Piper CPU)
-  # Uses environment variables: ADAPTER_TYPE, DEFAULT_MODEL
-  # For CosyVoice, use the cosyvoice profile instead (docker compose --profile cosyvoice up)
-  tts0:
-    profiles:
-      - piper  # Only start with --profile piper (prevents conflict with cosyvoice profile)
-    build:
-      context: .
-      dockerfile: Dockerfile.tts
-    container_name: tts-worker-0
-    ports:
-      - "7001:7001"  # gRPC (changed from 7002 to match config)
-      - "9090:9090"  # Metrics
-    environment:
-      # Use internal Docker DNS and correct Redis port (6379 inside container)
-      - REDIS_URL=redis://redis:6379
-      - CUDA_VISIBLE_DEVICES=0
-      - WORKER_NAME=tts-worker-0
-      # TTS Configuration - ensure model matches deployment profile
-      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
-      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
+    healthcheck:
+      # Health check only works in legacy mode (agent mode doesn't expose HTTP endpoint)
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Increased start period for WhisperX model download and loading
+      start_period: 150s
     depends_on:
       redis:
         condition: service_healthy
-    healthcheck:
-      # Use bash built-in TCP test instead of nc
-      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
+      livekit:
+        condition: service_healthy
     networks:
-      tts-network:
-        aliases:
-          - tts  # Common alias for orchestrator to connect regardless of model
-    volumes:
-      - ./voicepacks:/app/voicepacks:ro
+      - tts-network
     deploy:
       resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
         reservations:
           devices:
             - driver: nvidia
-              # device_ids: ['0']
               capabilities: [gpu]
 
-  # TTS Worker (CosyVoice GPU)
-  # Activated with: docker compose --profile cosyvoice up
-  # Uses isolated PyTorch 2.3.1 environment (see docs/COSYVOICE_PYTORCH_CONFLICT.md)
-  # This service uses a separate Dockerfile to avoid PyTorch version conflicts
-  # with the main project (PyTorch 2.7.0 vs CosyVoice requirement of 2.3.1)
+  # ============================================================================
+  # TTS WORKERS
+  # ============================================================================
+
+  # Piper TTS Worker (CPU) - Profile: piper, full-stack
+  tts0:
+    profiles:
+      - piper
+      - full-stack
+    build:
+      context: .
+      dockerfile: Dockerfile.tts
+    image: full-duplex-voice-chat-tts0:latest
+    container_name: tts-worker-0
+    restart: unless-stopped
+    ports:
+      - "7001:7001"  # gRPC
+      - "9090:9090"  # Metrics
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKER_NAME=tts-worker-0
+      - WORKER_PORT=7001
+      # TTS Configuration
+      - ADAPTER_TYPE=${ADAPTER_TYPE:-piper}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-piper-en-us-lessac-medium}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-piper-en-us-lessac-medium}
+      - TTL_MS=${TTL_MS:-600000}
+      - RESIDENT_CAP=${RESIDENT_CAP:-2}
+      # Metrics
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+    volumes:
+      - ./voicepacks:/app/voicepacks:ro
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      tts-network:
+        aliases:
+          - tts  # Common alias for orchestrator
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  # CosyVoice TTS Worker (GPU) - Profile: cosyvoice, full-stack
+  # Isolated PyTorch 2.3.1 environment (see docs/COSYVOICE_PYTORCH_CONFLICT.md)
   tts-cosyvoice:
+    profiles:
+      - cosyvoice
+      - full-stack
     build:
       context: .
       dockerfile: Dockerfile.tts-cosyvoice
+    image: full-duplex-voice-chat-tts-cosyvoice:latest
     container_name: tts-cosyvoice
+    restart: unless-stopped
+    runtime: nvidia
     ports:
       - "7002:7001"  # gRPC (expose on host 7002, container uses 7001)
       - "9091:9091"  # Metrics
@@ -217,65 +273,197 @@ services:
       - REDIS_URL=redis://redis:6379
       - CUDA_VISIBLE_DEVICES=0
       - WORKER_NAME=tts-cosyvoice
-      - WORKER_PORT=7001  # Use same internal port as tts0 for network alias
-      # TTS Configuration - CosyVoice specific
+      - WORKER_PORT=7001
+      # TTS Configuration
       - ADAPTER_TYPE=cosyvoice2
-      - DEFAULT_MODEL=cosyvoice2-en-base
-      - DEFAULT_MODEL_ID=cosyvoice2-en-base
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-cosyvoice2-en-base}
+      - DEFAULT_MODEL_ID=${DEFAULT_MODEL_ID:-cosyvoice2-en-base}
       - TTL_MS=600000
       - RESIDENT_CAP=2
+      # Metrics
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9091
+      # Logging
       - LOG_LEVEL=INFO
-      # Warning suppression (cleaner logs)
       - GRPC_TRACE=""
       - GRPC_VERBOSITY=ERROR
       - PYTHONWARNINGS=ignore::FutureWarning,ignore::UserWarning
+      # NVIDIA
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     env_file:
-      - .env.cosyvoice  # Optional: override with custom configuration
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 90s  # CosyVoice model loading takes longer
-    networks:
-      tts-network:
-        aliases:
-          - tts  # Common alias for orchestrator to connect regardless of model
+      - .env.cosyvoice
     volumes:
       # Mount voicepacks directory for CosyVoice models (rw for auto-download)
       - ./voicepacks/cosyvoice:/app/voicepacks/cosyvoice
-      # Optional: Mount CosyVoice repository if needed
-      # - ./third_party/CosyVoice:/app/CosyVoice:ro
-      # Persistent model caches (eliminates runtime downloads)
-      - modelscope-cache:/root/.cache/modelscope  # WeText FST files
-      - huggingface-cache:/root/.cache/huggingface  # Shared with orchestrator
-      - torch-cache:/root/.cache/torch  # Shared with orchestrator
+      # Persistent model caches
+      - modelscope-cache:/root/.cache/modelscope
+      - huggingface-cache:/root/.cache/huggingface
+      - torch-cache:/root/.cache/torch
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      tts-network:
+        aliases:
+          - tts  # Common alias for orchestrator
     deploy:
       resources:
+        limits:
+          memory: 16G
+          cpus: '4.0'
         reservations:
           devices:
             - driver: nvidia
+              count: 1
               capabilities: [gpu]
-        limits:
-          memory: 8G  # CosyVoice 2 needs ~6-8GB VRAM
+
+  # ============================================================================
+  # WEB FRONTEND (Profile: web, full-stack)
+  # ============================================================================
+
+  web:
     profiles:
-      - cosyvoice  # Only start with: docker compose --profile cosyvoice up
+      - web
+      - full-stack
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: full-duplex-voice-chat-web:latest
+    container_name: web-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL:-wss://voicechat.local:8444}
+      - NEXT_PUBLIC_LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - tts-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # ============================================================================
+  # MONITORING STACK (Profile: monitoring, full-stack)
+  # ============================================================================
+
+  # Prometheus metrics collector
+  prometheus:
+    profiles:
+      - monitoring
+      - full-stack
+    image: prom/prometheus:latest
+    container_name: prometheus-tts
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - tts-network
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+
+  # Grafana visualization platform
+  grafana:
+    profiles:
+      - monitoring
+      - full-stack
+    image: grafana/grafana:latest
+    container_name: grafana-tts
+    restart: unless-stopped
+    ports:
+      - "3033:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3033
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
 
 networks:
   tts-network:
     driver: bridge
+  monitoring:
+    driver: bridge
+
+# ============================================================================
+# VOLUMES (Persistent data and caches)
+# ============================================================================
 
 volumes:
+  # Caddy
   caddy-data:
     driver: local
   caddy-config:
     driver: local
   caddy-logs:
     driver: local
-  # Model cache volumes (persistent across container rebuilds)
+
+  # Model caches (persistent across container rebuilds)
   # Eliminates runtime downloads of WhisperX, WeText, and PyTorch models
   huggingface-cache:
     driver: local
@@ -284,4 +472,10 @@ volumes:
   mfa-cache:
     driver: local
   modelscope-cache:
+    driver: local
+
+  # Monitoring
+  prometheus-data:
+    driver: local
+  grafana-data:
     driver: local

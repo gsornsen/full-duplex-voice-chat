@@ -15,8 +15,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from src.tts.adapters.adapter_mock import AdapterState, MockTTSAdapter
-from src.tts.audio.synthesis import calculate_pcm_byte_size
+from tts.adapters.adapter_mock import AdapterState, MockTTSAdapter
+from tts.audio.synthesis import calculate_pcm_byte_size
 
 
 async def text_chunk_generator(chunks: list[str]) -> AsyncIterator[str]:

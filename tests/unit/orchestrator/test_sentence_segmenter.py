@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from src.orchestrator.sentence_segmenter import SentenceSegmenter
+from orchestrator.sentence_segmenter import SentenceSegmenter
 
 
 @pytest.fixture

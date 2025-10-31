@@ -29,7 +29,7 @@ from redis import asyncio as aioredis
 from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
-from src.orchestrator.config import (
+from orchestrator.config import (
     LiveKitConfig,
     OrchestratorConfig,
     RedisConfig,
@@ -37,8 +37,8 @@ from src.orchestrator.config import (
     TransportConfig,
     WebSocketConfig,
 )
-from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
-from src.orchestrator.server import start_server
+from orchestrator.registry import WorkerRegistration, WorkerRegistry
+from orchestrator.server import start_server
 
 # Lazy imports for gRPC - only imported when gRPC fixtures are used
 # This prevents segfault issues when running non-gRPC tests
@@ -306,8 +306,8 @@ async def mock_tts_worker() -> AsyncIterator[str]:
     # Lazy imports - only import when this fixture is used
     import grpc.aio
 
-    from src.rpc.generated import tts_pb2, tts_pb2_grpc
-    from src.tts.worker import start_worker
+    from rpc.generated import tts_pb2, tts_pb2_grpc
+    from tts.worker import start_worker
 
     # Use dynamic port allocation to avoid conflicts
     port = get_free_port()

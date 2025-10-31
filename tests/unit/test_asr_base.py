@@ -6,7 +6,7 @@ requiring a concrete adapter implementation.
 
 import pytest
 
-from src.asr.asr_base import (
+from asr.asr_base import (
     ASRAdapterBase,
     ASRCapabilities,
     ASRError,

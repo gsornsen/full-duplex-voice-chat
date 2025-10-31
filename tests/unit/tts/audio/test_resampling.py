@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from src.tts.audio.resampling import resample_audio
+from tts.audio.resampling import resample_audio
 
 
 # Fixtures for test data

@@ -13,9 +13,9 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from src.rpc.generated import tts_pb2
-from src.tts.model_manager import ModelManager
-from src.tts.worker import TTSWorkerServicer
+from rpc.generated import tts_pb2
+from tts.model_manager import ModelManager
+from tts.worker import TTSWorkerServicer
 
 # Mark all tests in this module as infrastructure (skip in CI - uses gRPC)
 pytestmark = [pytest.mark.grpc, pytest.mark.infrastructure]

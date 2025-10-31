@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from src.orchestrator.audio.buffer import (
+from orchestrator.audio.buffer import (
     AudioBuffer,
     BufferOverflowError,
     RingAudioBuffer,

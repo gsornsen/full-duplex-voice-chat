@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.orchestrator.telemetry import (
+from orchestrator.telemetry import (
     ProfilerConfig,
     RequestContext,
     configure_profiler,

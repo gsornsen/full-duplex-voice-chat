@@ -21,9 +21,9 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from src.tts.adapters.adapter_piper import PiperTTSAdapter
-from src.tts.model_manager import ModelManager
-from src.tts.tts_base import AdapterState
+from tts.adapters.adapter_piper import PiperTTSAdapter
+from tts.model_manager import ModelManager
+from tts.tts_base import AdapterState
 
 
 @pytest.fixture
@@ -83,11 +83,11 @@ async def test_model_manager_loads_piper_model(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test ModelManager can load Piper model via adapter."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         # Patch the voicepack path resolution
-        with patch("src.tts.model_manager.Path") as mock_path_class:
+        with patch("tts.model_manager.Path") as mock_path_class:
             mock_voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
             mock_path_class.return_value = mock_voicepack_path
 
@@ -112,7 +112,7 @@ async def test_end_to_end_session_synthesis(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test end-to-end synthesis session with Piper adapter."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
@@ -153,7 +153,7 @@ async def test_barge_in_pause_latency_maintained(
     audio_chunk.audio_int16_array = audio_samples
     mock_piper_voice.synthesize.return_value = [audio_chunk]
 
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
@@ -199,7 +199,7 @@ async def test_first_audio_latency_measurement(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test First Audio Latency (FAL) measurement for Piper."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
@@ -234,10 +234,10 @@ async def test_model_switch_piper_to_mock_to_piper(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test switching between Piper and Mock adapters."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
-        with patch("src.tts.model_manager.Path") as mock_path_class:
+        with patch("tts.model_manager.Path") as mock_path_class:
             voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
             mock_path_class.return_value = voicepack_path
 
@@ -279,7 +279,7 @@ async def test_concurrent_piper_sessions(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test concurrent synthesis sessions with Piper adapter."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
@@ -318,10 +318,10 @@ async def test_ttl_eviction_with_piper_model(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test TTL eviction works correctly with Piper models."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
-        with patch("src.tts.model_manager.Path") as mock_path_class:
+        with patch("tts.model_manager.Path") as mock_path_class:
             voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
             mock_path_class.return_value = voicepack_path
 
@@ -366,10 +366,10 @@ async def test_list_models_includes_piper(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test ListModels includes Piper models in registry."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
-        with patch("src.tts.model_manager.Path") as mock_path_class:
+        with patch("tts.model_manager.Path") as mock_path_class:
             voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
             mock_path_class.return_value = voicepack_path
 
@@ -396,7 +396,7 @@ async def test_get_capabilities_reports_correct_sample_rate(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test GetCapabilities reports correct sample rate for Piper."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
@@ -408,7 +408,7 @@ async def test_get_capabilities_reports_correct_sample_rate(
         # Verify adapter reports correct rates
         assert adapter.native_sample_rate == 22050  # From config
         # Output is always 48kHz (TARGET_SAMPLE_RATE_HZ)
-        from src.tts.adapters.adapter_piper import TARGET_SAMPLE_RATE_HZ
+        from tts.adapters.adapter_piper import TARGET_SAMPLE_RATE_HZ
 
         assert TARGET_SAMPLE_RATE_HZ == 48000
 
@@ -432,10 +432,10 @@ async def test_piper_warmup_with_model_manager(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test Piper model warmup via ModelManager."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
-        with patch("src.tts.model_manager.Path") as mock_path_class:
+        with patch("tts.model_manager.Path") as mock_path_class:
             voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"
             mock_path_class.return_value = voicepack_path
 
@@ -467,7 +467,7 @@ async def test_piper_frame_timing_consistency(
     mock_voicepack_structure: Path, mock_piper_voice: Mock
 ) -> None:
     """Test Piper adapter maintains consistent frame timing."""
-    with patch("src.tts.adapters.adapter_piper.PiperVoice") as mock_piper:
+    with patch("tts.adapters.adapter_piper.PiperVoice") as mock_piper:
         mock_piper.load.return_value = mock_piper_voice
 
         voicepack_path = mock_voicepack_structure / "piper" / "en-us-test"

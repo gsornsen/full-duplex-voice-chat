@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.orchestrator.registry import WorkerRegistration, WorkerRegistry
-from src.orchestrator.routing import Router
+from orchestrator.registry import WorkerRegistration, WorkerRegistry
+from orchestrator.routing import Router
 
 
 # Test data fixtures
