@@ -50,7 +50,7 @@ services:
       - ./configs/livekit.yaml:/etc/livekit/config.yaml:ro
     environment:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
       interval: 10s
@@ -113,7 +113,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     networks:
       - tts-network
     deploy:
@@ -132,13 +132,13 @@ services:
       dockerfile: Dockerfile.orchestrator
     image: full-duplex-voice-chat-orchestrator:latest
     container_name: orchestrator
-    restart: unless-stopped
+    restart: on-failure:5
     environment:
       - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
       - REDIS_URL=redis://redis:6379
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
       - DEFAULT_TTS_WORKER=${DEFAULT_TTS_WORKER:-tts-cosyvoice:7001}
       - ROUTING_STRATEGY=${ROUTING_STRATEGY:-least_loaded}
       - ROUTING_AFFINITY_ENABLED=${ROUTING_AFFINITY_ENABLED:-true}
@@ -159,7 +159,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 150s
+      start_period: 300s
     depends_on:
       redis:
         condition: service_healthy
@@ -223,7 +223,7 @@ services:
       dockerfile: Dockerfile.tts-cosyvoice
     image: full-duplex-voice-chat-tts-cosyvoice:latest
     container_name: tts-cosyvoice
-    restart: unless-stopped
+    restart: on-failure:5
     runtime: nvidia
     environment:
       - REDIS_URL=redis://redis:6379
@@ -251,7 +251,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 900s
     depends_on:
       redis:
         condition: service_healthy

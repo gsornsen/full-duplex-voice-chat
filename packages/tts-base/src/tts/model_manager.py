@@ -444,7 +444,7 @@ class ModelManager:
 
             # First attempt: Try to import and load CosyVoice adapter
             try:
-                from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+                from tts.adapters.cosyvoice.adapter import CosyVoiceAdapter
 
                 cosyvoice_adapter: Any = CosyVoiceAdapter(
                     model_id=model_id, model_path=voicepack_path
@@ -463,7 +463,7 @@ class ModelManager:
 
                 try:
                     # Import download function (may also fail if huggingface_hub not installed)
-                    from tts.adapters.adapter_cosyvoice import (
+                    from tts.adapters.cosyvoice.adapter import (
                         _download_cosyvoice_model_if_needed,
                     )
 
@@ -476,7 +476,7 @@ class ModelManager:
                     )
 
                     # Second attempt: Try to import and load again after download
-                    from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
+                    from tts.adapters.cosyvoice.adapter import CosyVoiceAdapter
 
                     cosyvoice_adapter = CosyVoiceAdapter(
                         model_id=model_id, model_path=voicepack_path
