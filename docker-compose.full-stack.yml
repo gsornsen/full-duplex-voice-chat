@@ -135,7 +135,7 @@ services:
     restart: unless-stopped
     environment:
       - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
-      - REDIS_URL=redis://redis:6377
+      - REDIS_URL=redis://redis:6379
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
@@ -186,7 +186,7 @@ services:
   #   container_name: tts-worker-0
   #   restart: unless-stopped
   #   environment:
-  #     - REDIS_URL=redis://redis:6377
+  #     - REDIS_URL=redis://redis:6379
   #     - WORKER_NAME=tts-worker-0
   #     - WORKER_PORT=7001
   #     - ADAPTER_TYPE=piper
@@ -226,7 +226,7 @@ services:
     restart: unless-stopped
     runtime: nvidia
     environment:
-      - REDIS_URL=redis://redis:6377
+      - REDIS_URL=redis://redis:6379
       - WORKER_NAME=tts-cosyvoice
       - WORKER_PORT=7001
       - ADAPTER_TYPE=cosyvoice2
