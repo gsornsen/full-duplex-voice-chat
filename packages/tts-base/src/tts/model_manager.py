@@ -437,15 +437,11 @@ class ModelManager:
             voice_name = model_id.replace("cosyvoice2-", "", 1)
             voicepack_path = Path(f"voicepacks/cosyvoice/{voice_name}")
 
-            if not voicepack_path.exists():
-                raise ModelNotFoundError(
-                    f"Voicepack not found for model {model_id}: {voicepack_path}"
-                )
-
             # First attempt: Try to import and load CosyVoice adapter
             try:
                 from tts.adapters.cosyvoice.adapter import CosyVoiceAdapter
 
+                # If voicepack doesn't exist, CosyVoiceAdapter will attempt download
                 cosyvoice_adapter: Any = CosyVoiceAdapter(
                     model_id=model_id, model_path=voicepack_path
                 )
