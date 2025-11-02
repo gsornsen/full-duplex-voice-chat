@@ -13,7 +13,6 @@ import asyncio
 import logging
 
 import pytest
-
 from orchestrator.registry import WorkerRegistration, WorkerRegistry
 
 logger = logging.getLogger(__name__)

@@ -19,7 +19,6 @@ from collections.abc import AsyncIterator
 
 import numpy as np
 import pytest
-
 from tts.adapters.cosyvoice.adapter import (
     COSYVOICE_NATIVE_SAMPLE_RATE,
     TARGET_SAMPLE_RATE_HZ,

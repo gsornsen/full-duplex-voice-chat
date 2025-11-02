@@ -16,7 +16,6 @@ Coverage:
 import time
 
 import numpy as np
-
 from orchestrator.audio.buffer import RMSBuffer
 
 

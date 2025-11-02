@@ -7,7 +7,6 @@ import time
 from unittest.mock import AsyncMock
 
 import pytest
-
 from orchestrator.registry import WorkerRegistration, WorkerRegistry
 from orchestrator.routing import Router
 

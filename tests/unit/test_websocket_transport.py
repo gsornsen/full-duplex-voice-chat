@@ -10,8 +10,6 @@ from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from websockets.protocol import State
-
 from orchestrator.audio.packetizer import (
     EXPECTED_FRAME_SIZE_BYTES,
     AudioFramePacketizer,
@@ -30,6 +28,7 @@ from orchestrator.transport.websocket_transport import (
     WebSocketSession,
     WebSocketTransport,
 )
+from websockets.protocol import State
 
 
 class TestAudioFramePacketizer:

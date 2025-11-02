@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-
 from orchestrator.config import (
     LiveKitConfig,
     OrchestratorConfig,

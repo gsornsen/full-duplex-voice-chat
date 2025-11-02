@@ -22,7 +22,6 @@ import asyncio
 import time
 
 import pytest
-
 from orchestrator.transcript_buffer import TranscriptBuffer, TranscriptEntry
 
 

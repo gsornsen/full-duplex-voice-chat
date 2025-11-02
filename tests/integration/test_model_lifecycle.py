@@ -12,7 +12,6 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
-
 from rpc.generated import tts_pb2
 from tts.model_manager import ModelManager
 from tts.worker import TTSWorkerServicer

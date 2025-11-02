@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-
 from orchestrator.health import setup_health_routes
 from orchestrator.metrics import MetricsCollector, get_metrics_collector
 

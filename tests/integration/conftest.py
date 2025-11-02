@@ -25,10 +25,6 @@ import pytest
 import pytest_asyncio
 import torch
 import websockets
-from redis import asyncio as aioredis
-from websockets.asyncio.client import ClientConnection
-from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
-
 from orchestrator.config import (
     LiveKitConfig,
     OrchestratorConfig,
@@ -39,6 +35,9 @@ from orchestrator.config import (
 )
 from orchestrator.registry import WorkerRegistration, WorkerRegistry
 from orchestrator.server import start_server
+from redis import asyncio as aioredis
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
 # Lazy imports for gRPC - only imported when gRPC fixtures are used
 # This prevents segfault issues when running non-gRPC tests
@@ -305,7 +304,6 @@ async def mock_tts_worker() -> AsyncIterator[str]:
     """
     # Lazy imports - only import when this fixture is used
     import grpc.aio
-
     from rpc.generated import tts_pb2, tts_pb2_grpc
     from tts.worker import start_worker
 

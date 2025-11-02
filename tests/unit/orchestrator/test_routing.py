@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from orchestrator.registry import WorkerRegistration, WorkerRegistry
 from orchestrator.routing import Router, RoutingStrategy
 

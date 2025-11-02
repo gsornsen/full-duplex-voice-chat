@@ -14,7 +14,6 @@ import time
 from collections.abc import AsyncIterator
 
 import pytest
-
 from tts.adapters.adapter_mock import AdapterState, MockTTSAdapter
 from tts.audio.synthesis import calculate_pcm_byte_size
 

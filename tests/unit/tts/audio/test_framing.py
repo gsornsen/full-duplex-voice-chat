@@ -7,7 +7,6 @@ chunks into fixed 20ms frames required by WebRTC transport.
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-
 from tts.audio.framing import repacketize_to_20ms
 
 

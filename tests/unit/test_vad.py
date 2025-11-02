@@ -9,7 +9,6 @@ import struct
 
 import numpy as np
 import pytest
-
 from orchestrator.audio.resampler import AudioResampler, create_vad_resampler
 from orchestrator.config import VADConfig
 from orchestrator.vad import DefaultVADEventHandler, VADProcessor

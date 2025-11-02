@@ -12,9 +12,8 @@ Coverage:
 """
 
 import pytest
-from pydantic import ValidationError
-
 from orchestrator.config import SessionConfig
+from pydantic import ValidationError
 
 
 class TestSessionConfigInit:

@@ -19,11 +19,11 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-
 from orchestrator.config import VADConfig
 from orchestrator.session import SessionManager, SessionState
 from orchestrator.transport.base import TransportSession
 from orchestrator.vad import VADProcessor
+
 from tests.helpers.vad_test_utils import (
     VADTestRecorder,
     generate_audio_sequence,

@@ -14,9 +14,9 @@ import time
 
 import numpy as np
 import pytest
-
 from orchestrator.config import VADConfig
 from orchestrator.vad import VADProcessor
+
 from tests.helpers.vad_test_utils import (
     BargeInLatencyMeasurement,
     VADTestRecorder,

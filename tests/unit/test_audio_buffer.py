@@ -7,7 +7,6 @@ from VAD events before sending to ASR.
 import asyncio
 
 import pytest
-
 from orchestrator.audio.buffer import (
     AudioBuffer,
     BufferOverflowError,

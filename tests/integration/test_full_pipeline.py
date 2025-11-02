@@ -510,7 +510,6 @@ async def test_component_integration_health_checks(
 
     # Test worker reachability
     import grpc
-
     from rpc.generated import tts_pb2, tts_pb2_grpc
 
     mock_worker = next(

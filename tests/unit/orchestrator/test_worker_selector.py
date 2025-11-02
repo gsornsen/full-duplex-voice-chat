@@ -7,7 +7,6 @@ import time
 from typing import Any
 
 import pytest
-
 from orchestrator.registry import WorkerRegistration
 from orchestrator.worker_selector import WorkerSelector
 

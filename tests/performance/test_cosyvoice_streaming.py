@@ -29,7 +29,6 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 import torch
-
 from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
 
 # Performance test markers

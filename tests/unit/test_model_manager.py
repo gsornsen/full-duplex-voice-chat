@@ -8,7 +8,6 @@ import asyncio
 import time
 
 import pytest
-
 from tts.model_manager import (
     ModelManager,
     ModelManagerError,

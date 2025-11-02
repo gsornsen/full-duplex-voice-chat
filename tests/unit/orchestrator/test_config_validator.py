@@ -1,9 +1,8 @@
 """Tests for configuration validator."""
 
 import pytest
-from pytest import MonkeyPatch
-
 from orchestrator.config_validator import ConfigurationError, ConfigValidator
+from pytest import MonkeyPatch
 
 
 def test_validate_tts_cosyvoice_configuration(monkeypatch: MonkeyPatch) -> None:

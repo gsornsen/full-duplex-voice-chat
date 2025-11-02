@@ -20,7 +20,6 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
-
 from tts.adapters.adapter_piper import PiperTTSAdapter
 from tts.model_manager import ModelManager
 from tts.tts_base import AdapterState

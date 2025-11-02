@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from livekit import rtc
-
 from orchestrator.config import LiveKitConfig
 from orchestrator.livekit_utils.room_manager import LiveKitRoomManager
 from orchestrator.transport.livekit_transport import (

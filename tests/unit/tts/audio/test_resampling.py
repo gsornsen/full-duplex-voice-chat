@@ -7,7 +7,6 @@ Covers basic resampling, edge cases, type preservation, and quality validation.
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-
 from tts.audio.resampling import resample_audio
 
 

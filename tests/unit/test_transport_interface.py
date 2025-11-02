@@ -7,7 +7,6 @@ conform to the interface contract.
 from collections.abc import AsyncIterator
 
 import pytest
-
 from orchestrator.transport.base import Transport, TransportSession
 
 

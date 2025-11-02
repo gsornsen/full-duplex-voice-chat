@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-
 from orchestrator.session import VALID_TRANSITIONS, SessionManager, SessionState
 from orchestrator.transport.base import TransportSession
 

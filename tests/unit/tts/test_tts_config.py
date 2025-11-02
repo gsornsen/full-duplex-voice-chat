@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-
 from tts.config import (
     AudioConfig,
     LoggingConfig,

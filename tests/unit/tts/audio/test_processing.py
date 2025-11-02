@@ -6,7 +6,6 @@ and the complete processing pipeline.
 
 import numpy as np
 import pytest
-
 from tts.audio.processing import (
     apply_dither,
     apply_fade,

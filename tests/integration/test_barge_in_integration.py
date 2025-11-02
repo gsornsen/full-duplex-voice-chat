@@ -17,12 +17,12 @@ import logging
 import time
 
 import pytest
-from websockets.asyncio.client import ClientConnection
-
 from orchestrator.audio.resampler import create_vad_resampler
 from orchestrator.config import OrchestratorConfig, VADConfig
 from orchestrator.session import SessionMetrics
 from orchestrator.vad import VADProcessor
+from websockets.asyncio.client import ClientConnection
+
 from tests.helpers.vad_test_utils import (
     VADTestRecorder,
     generate_audio_sequence,

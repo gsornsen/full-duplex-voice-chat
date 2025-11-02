@@ -12,7 +12,6 @@ import threading
 import time
 
 import pytest
-
 from orchestrator.metrics import (
     Counter,
     Gauge,

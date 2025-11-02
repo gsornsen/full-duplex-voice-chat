@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-
 from tts.audio.synthesis import (
     calculate_frame_count,
     calculate_pcm_byte_size,

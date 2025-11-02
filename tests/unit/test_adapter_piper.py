@@ -12,7 +12,6 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
-
 from tts.adapters.adapter_piper import (
     SAMPLES_PER_FRAME,
     TARGET_SAMPLE_RATE_HZ,

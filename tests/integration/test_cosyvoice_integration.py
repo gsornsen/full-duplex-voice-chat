@@ -34,7 +34,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import torch
-
 from tts.adapters.adapter_cosyvoice import CosyVoiceAdapter
 from tts.tts_base import AdapterState
 

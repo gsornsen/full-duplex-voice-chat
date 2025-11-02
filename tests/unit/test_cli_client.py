@@ -8,8 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 import websockets
-
-from src.client.cli_client import AudioPlayer, CLIClient
 from orchestrator.transport.websocket_protocol import (
     AudioMessage,
     ErrorMessage,
@@ -17,6 +15,7 @@ from orchestrator.transport.websocket_protocol import (
     SessionStartMessage,
     TextMessage,
 )
+from src.client.cli_client import AudioPlayer, CLIClient
 
 
 class TestAudioPlayer:

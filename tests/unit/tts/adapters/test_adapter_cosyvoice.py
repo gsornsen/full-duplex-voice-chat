@@ -26,7 +26,6 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 import torch
-
 from tts.adapters.cosyvoice.adapter import CosyVoiceAdapter
 from tts.tts_base import AdapterState
 

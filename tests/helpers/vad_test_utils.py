@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
-
 from orchestrator.config import VADConfig
 
 logger = logging.getLogger(__name__)

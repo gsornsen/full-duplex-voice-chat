@@ -13,7 +13,6 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
-
 from orchestrator.sentence_segmenter import SentenceSegmenter
 
 
