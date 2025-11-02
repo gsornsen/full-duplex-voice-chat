@@ -74,7 +74,8 @@
       "Bash(tr:*)",
       "Bash(gh pr list:*)",
       "Bash(git cherry-pick:*)",
-      "mcp__RedisMCPServer__scan_all_keys"
+      "mcp__RedisMCPServer__scan_all_keys",
+      "Bash(npm install)"
     ],
     "deny": [],
     "ask": []
