@@ -241,7 +241,7 @@ services:
       - "9091:9091"  # Metrics
     volumes:
       - ./src:/app/src:ro
-      - ./voicepacks:/app/voicepacks:rw
+      - cosyvoice-voicepacks:/app/voicepacks:rw
       - huggingface-cache:/root/.cache/huggingface:rw
       - torch-cache:/root/.cache/torch:rw
       - modelscope-cache:/root/.cache/modelscope:rw
@@ -360,4 +360,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  cosyvoice-voicepacks:
     driver: local
