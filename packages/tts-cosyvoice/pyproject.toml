@@ -18,7 +18,7 @@ dependencies = [
 
     # Protobuf 4.x (PINNED for CosyVoice compatibility)
     # This is isolated from orchestrator's Protobuf 5.x
-    "protobuf==4.24.4",
+    "protobuf==4.25.8",
 
     # CosyVoice dependencies
     "modelscope>=1.31.0",
