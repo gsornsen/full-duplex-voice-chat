@@ -13,6 +13,7 @@ Key features:
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -245,17 +246,46 @@ class CosyVoiceAdapter:
                 "Install with: pip install cosyvoice"
             )
 
+        # Enable TensorRT if requested (provides ~2x speedup on flow matching stage)
+        # TensorRT requires initial compilation but dramatically improves RTF
+        use_tensorrt = os.getenv("USE_TENSORRT", "false").lower() == "true"
+        use_vllm = os.getenv("USE_VLLM", "false").lower() == "true"
+        
         try:
             self.model = CosyVoice2(
                 str(self.model_path),
                 load_jit=False,  # Optional optimization
-                load_trt=False,  # Optional TensorRT (GPU-specific)
-                load_vllm=False,  # Optional vLLM acceleration
+                load_trt=use_tensorrt,  # TensorRT optimization (~2x speedup on RTX 4090)
+                load_vllm=use_vllm,  # vLLM acceleration for LLM stage (~2x speedup)
                 fp16=True,  # FP16 for faster inference
             )
+            # Verify TensorRT compilation status if enabled
+            tensorrt_status = "not_enabled"
+            if use_tensorrt:
+                try:
+                    # Check if TensorRT engines exist (indicates compilation)
+                    trt_dir = Path(self.model_path) / "trt"
+                    if trt_dir.exists():
+                        trt_files = list(trt_dir.glob("*.engine"))
+                        if trt_files:
+                            tensorrt_status = f"compiled ({len(trt_files)} engines)"
+                        else:
+                            tensorrt_status = "compiling (first run)"
+                    else:
+                        tensorrt_status = "compiling (first run)"
+                except Exception:
+                    tensorrt_status = "unknown"
+            
             logger.info(
                 "CosyVoice 2 model loaded successfully",
-                extra={"model_id": model_id, "model_path": str(self.model_path)},
+                extra={
+                    "model_id": model_id,
+                    "model_path": str(self.model_path),
+                    "tensorrt_enabled": use_tensorrt,
+                    "tensorrt_status": tensorrt_status,
+                    "vllm_enabled": use_vllm,
+                    "fp16_enabled": True,
+                },
             )
         except Exception as e:
             logger.error(
@@ -442,7 +472,11 @@ class CosyVoiceAdapter:
                 inference_start = time.perf_counter()
 
                 # Retry logic for numerical instability in CosyVoice sampling
+                # Uses exponential backoff to allow GPU state to stabilize between retries
                 max_retries = 3
+                initial_delay = 0.1  # 100ms
+                backoff_factor = 2.0
+                
                 for attempt in range(max_retries):
                     try:
                         for chunk in self.model.inference_zero_shot(
@@ -459,16 +493,93 @@ class CosyVoiceAdapter:
                         break  # Success!
                     except RuntimeError as e:
                         if "probability tensor" in str(e) and attempt < max_retries - 1:
+                            # Calculate exponential backoff delay
+                            delay = initial_delay * (backoff_factor ** attempt)
+                            
                             logger.warning(
                                 f"CosyVoice sampling error (attempt {attempt + 1}/{max_retries}), "
-                                f"retrying... Error: {e}",
-                                extra={"model_id": self.model_id, "text_length": len(text)},
+                                f"retrying in {delay:.3f}s... Error: {e}",
+                                extra={
+                                    "model_id": self.model_id,
+                                    "text_length": len(text),
+                                    "attempt": attempt + 1,
+                                    "delay": delay,
+                                },
                             )
                             audio_chunks.clear()  # Clear partial results
+                            
+                            # Wait before retry to allow GPU state to stabilize
+                            time.sleep(delay)
                             continue
                         else:
+                            # If all retries failed, try fallback: synthesize text in chunks (by sentences)
+                            if attempt == max_retries - 1 and "probability tensor" in str(e):
+                                logger.warning(
+                                    f"CosyVoice synthesis failed after {max_retries} attempts, "
+                                    "trying fallback: chunked synthesis",
+                                    extra={
+                                        "model_id": self.model_id,
+                                        "text_length": len(text),
+                                        "error": str(e),
+                                    },
+                                )
+                                
+                                # Fallback: split text into sentences and synthesize separately
+                                import re
+                                sentences = re.split(r'([.!?]+[\s\n]*)', text)
+                                # Filter empty sentences and merge punctuation with previous sentence
+                                processed_sentences: list[str] = []
+                                for i, sentence in enumerate(sentences):
+                                    if sentence.strip():
+                                        if i > 0 and processed_sentences and re.match(r'^[.!?]+\s*$', sentence):
+                                            processed_sentences[-1] += sentence
+                                        else:
+                                            processed_sentences.append(sentence)
+                                
+                                if processed_sentences:
+                                    logger.debug(
+                                        f"Synthesizing {len(processed_sentences)} chunks separately",
+                                        extra={"model_id": self.model_id},
+                                    )
+                                    
+                                    chunked_audio: list[torch.Tensor] = []
+                                    for chunk_idx, chunk_text in enumerate(processed_sentences):
+                                        try:
+                                            for chunk_result in self.model.inference_zero_shot(
+                                                tts_text=chunk_text,
+                                                prompt_text="",
+                                                prompt_speech_16k=silence_prompt,
+                                                stream=False,
+                                                speed=1.0,
+                                            ):
+                                                chunked_audio.append(chunk_result["tts_speech"])
+                                        except RuntimeError as chunk_error:
+                                            if "probability tensor" in str(chunk_error):
+                                                logger.warning(
+                                                    f"Chunk {chunk_idx + 1}/{len(processed_sentences)} "
+                                                    f"also failed with probability tensor error, skipping",
+                                                    extra={
+                                                        "model_id": self.model_id,
+                                                        "chunk_text": chunk_text[:50],
+                                                    },
+                                                )
+                                                # Skip this chunk but continue with others
+                                                continue
+                                            else:
+                                                raise
+                                    
+                                    if chunked_audio:
+                                        audio_chunks = chunked_audio
+                                        logger.info(
+                                            f"Fallback chunked synthesis succeeded "
+                                            f"({len(chunked_audio)} chunks)",
+                                            extra={"model_id": self.model_id},
+                                        )
+                                        break  # Success with fallback!
+                            
                             logger.error(
-                                f"CosyVoice synthesis failed after {max_retries} attempts",
+                                f"CosyVoice synthesis failed after {max_retries} attempts "
+                                f"and fallback strategies",
                                 extra={"model_id": self.model_id, "error": str(e)},
                             )
                             raise

@@ -22,7 +22,7 @@ from typing import Any
 from livekit.agents import APIConnectOptions, stt, utils
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, NotGiven
 
-from orchestrator.asr.adapters.adapter_whisperx import WhisperXAdapter
+from asr.adapters.adapter_whisperx import WhisperXAdapter
 
 logger = logging.getLogger(__name__)
 

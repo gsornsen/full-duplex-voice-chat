@@ -15,12 +15,11 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04 AS builder
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Python 3.10 and system dependencies
+# Install system dependencies and Python 3.10
+# Note: We use system Python to ensure venv works correctly in both build and runtime stages
 RUN apt-get update && apt-get install -y \
     python3.10 \
-    python3.10-venv \
     python3.10-dev \
-    python3-pip \
     git \
     wget \
     curl \
@@ -33,15 +32,18 @@ RUN apt-get update && apt-get install -y \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
+# Install uv (fast Python package manager)
+# Note: We don't need python3-pip or python3.10-venv since uv handles package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Set PATH for uv
+ENV PATH="/root/.local/bin:$PATH"
+
 # Create app directory
 WORKDIR /app
 
 # Create Triton autotune directory (prevents df error from DeepSpeed)
 RUN mkdir -p /root/.triton/autotune
-
-# Install uv for fast dependency management
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --no-cache-dir uv
 
 # Copy workspace root files first (better layer caching)
 COPY pyproject.toml uv.lock README.md ./
@@ -53,25 +55,37 @@ COPY packages/common/ ./packages/common/
 COPY packages/tts-base/ ./packages/tts-base/
 COPY packages/tts-cosyvoice/ ./packages/tts-cosyvoice/
 
+# Create virtual environment using uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv
+
+# Install pip in the venv (uv venv doesn't include pip by default)
+# This is needed for packages like tensorrt-cu12 that require pip during build
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    uv pip install pip
+
 # Install PyTorch 2.3.1 with CUDA 12.1 support (CosyVoice requirement)
-# Use cache mount to speed up rebuilds
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --no-cache-dir \
+# Use uv with cache mount to speed up rebuilds
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    uv pip install \
+    --index-url https://download.pytorch.org/whl/cu121 \
     torch==2.3.1 \
-    torchaudio==2.3.1 \
-    --index-url https://download.pytorch.org/whl/cu121
+    torchaudio==2.3.1
 
 # Install CosyVoice 2 dependencies (excluding modelscope - using huggingface_hub instead)
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    uv pip install \
     numpy==1.26.4 \
     scipy==1.13.0 \
     soundfile \
     librosa \
     pydantic \
     pyyaml \
-    grpcio>=1.60.0 \
-    grpcio-tools>=1.60.0 \
+    "grpcio>=1.60.0" \
+    "grpcio-tools>=1.60.0" \
     protobuf==4.24.4 \
     redis \
     huggingface-hub
@@ -82,12 +96,20 @@ RUN mkdir -p /app/third_party && \
     git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git /app/third_party/CosyVoice && \
     cd /app/third_party/CosyVoice && \
     git submodule update --init --recursive && \
-    pip3 install --no-cache-dir -r requirements.txt && \
     rm -rf .git  # Remove .git to reduce image size
+
+# Install CosyVoice requirements using venv's pip
+# Note: Using pip directly instead of uv pip because some packages (like tensorrt-cu12)
+# require pip to be available during their build process, and uv's isolated build
+# environments don't include pip. The venv's pip handles multiple indexes correctly.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    .venv/bin/pip install \
+    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    -r /app/third_party/CosyVoice/requirements.txt
 
 # Generate gRPC stubs directly in the container (using protobuf 4.24.4)
 RUN mkdir -p packages/proto/src/rpc/generated && \
-    python3 -m grpc_tools.protoc \
+    .venv/bin/python -m grpc_tools.protoc \
     -I packages/proto/src/rpc \
     --python_out=packages/proto/src/rpc/generated \
     --grpc_python_out=packages/proto/src/rpc/generated \
@@ -105,10 +127,9 @@ RUN touch packages/proto/src/__init__.py && \
 
 # Install workspace packages manually (avoiding uv sync due to protobuf conflict)
 # Skip proto package (protobuf 5.x conflicts with CosyVoice's protobuf 4.24.4)
-# Install packages using absolute paths
-RUN pip3 install --no-deps -e /app/packages/common && \
-    pip3 install --no-deps -e /app/packages/tts-base && \
-    pip3 install --no-deps -e /app/packages/tts-cosyvoice
+# Use venv's pip directly to avoid uv's workspace detection issues
+RUN --mount=type=cache,target=/root/.cache/pip \
+    .venv/bin/pip install --no-deps -e /app/packages/common -e /app/packages/tts-base -e /app/packages/tts-cosyvoice
 
 # Copy config files
 COPY configs/ ./configs/
@@ -122,12 +143,13 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies only
+# Install gosu for proper user switching in entrypoint
 RUN apt-get update && apt-get install -y \
     python3.10 \
-    python3-pip \
     curl \
     libsndfile1 \
     ffmpeg \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.10 as default
@@ -138,22 +160,33 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 RUN groupadd -r cosyvoice && useradd -r -g cosyvoice -u 1000 cosyvoice
 
 # Create directories with proper permissions BEFORE switching user
-RUN mkdir -p /root/.triton/autotune \
-    /home/cosyvoice/.cache/modelscope \
-    /home/cosyvoice/.cache/huggingface \
+# Create nested cache directory structures to ensure proper permissions for model downloads
+# ModelScope needs nested hub/owner/repo directories for cache files
+RUN mkdir -p /home/cosyvoice/.triton/autotune \
+    /home/cosyvoice/.cache/modelscope/hub \
+    /home/cosyvoice/.cache/huggingface/hub \
     /home/cosyvoice/.cache/torch \
-    && chown -R cosyvoice:cosyvoice /root/.triton /home/cosyvoice
+    /app/voicepacks/cosyvoice \
+    && chown -R cosyvoice:cosyvoice /home/cosyvoice /app/voicepacks \
+    && chmod -R u+w /home/cosyvoice/.cache 2>/dev/null || true
 
 # Set working directory
 WORKDIR /app
-
-# Copy Python dependencies from builder (with proper ownership)
-COPY --from=builder --chown=cosyvoice:cosyvoice /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 
 # Copy workspace structure from builder (with proper ownership)
 COPY --from=builder --chown=cosyvoice:cosyvoice /app/packages /app/packages
 COPY --from=builder --chown=cosyvoice:cosyvoice /app/third_party /app/third_party
 COPY --from=builder --chown=cosyvoice:cosyvoice /app/configs /app/configs
+
+# Copy .venv from builder (contains all installed packages)
+COPY --from=builder --chown=cosyvoice:cosyvoice /app/.venv /app/.venv
+
+# Copy entrypoint script for runtime permission fixes
+COPY --chown=cosyvoice:cosyvoice docker/entrypoint-tts-cosyvoice.sh /app/docker/entrypoint-tts-cosyvoice.sh
+RUN chmod +x /app/docker/entrypoint-tts-cosyvoice.sh
+
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Set environment variables for cache directories
 ENV MODELSCOPE_CACHE=/home/cosyvoice/.cache/modelscope
@@ -168,8 +201,9 @@ ENV PYTHONUNBUFFERED=1
 ENV CUDA_VISIBLE_DEVICES=0
 ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
-# Switch to non-root user
-USER cosyvoice
+# Note: We do NOT switch to cosyvoice user here
+# The entrypoint script runs as root to fix volume permissions, then switches to cosyvoice
+# USER cosyvoice  # Removed - entrypoint handles user switching
 
 # Expose ports
 EXPOSE 7001 9091
@@ -178,5 +212,10 @@ EXPOSE 7001 9091
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD timeout 1 bash -c '</dev/tcp/localhost/7001' || exit 1
 
+# Use entrypoint to fix permissions at runtime
+# Entrypoint must run as root to fix volume permissions, then switch to cosyvoice
+ENTRYPOINT ["/app/docker/entrypoint-tts-cosyvoice.sh"]
+
 # Default command - run TTS worker from tts-base package
+# Note: Entrypoint script will switch to cosyvoice user before executing
 CMD ["python3", "-m", "tts.worker_main", "--port", "7001"]

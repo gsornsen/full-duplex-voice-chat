@@ -15,6 +15,7 @@ Features:
 
 import asyncio
 import logging
+import random
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -160,7 +161,7 @@ class TTS(tts.TTS[None]):
         return "grpc-tts-worker"
 
     async def _ensure_connected(self) -> None:
-        """Ensure gRPC connection and session are established."""
+        """Ensure gRPC connection and session are established with exponential backoff retry."""
         if self._stub is not None and self._session_id is not None:
             return
 
@@ -169,33 +170,89 @@ class TTS(tts.TTS[None]):
             if self._stub is not None and self._session_id is not None:
                 return
 
-            logger.info(f"Connecting to gRPC TTS worker at {self._worker_address}...")
+            # Retry configuration
+            max_retries = 10
+            initial_delay = 0.5  # 500ms
+            max_delay = 30.0  # 30s
+            backoff_factor = 1.5
 
-            # Create gRPC channel
-            self._channel = grpc.aio.insecure_channel(self._worker_address)
-            self._stub = tts_pb2_grpc.TTSServiceStub(self._channel)  # type: ignore[no-untyped-call]
+            last_exception: Exception | None = None
 
-            # Generate unique session ID
-            self._session_id = str(uuid.uuid4())
+            for attempt in range(max_retries):
+                try:
+                    logger.info(
+                        f"Connecting to gRPC TTS worker at {self._worker_address}...",
+                        extra={"attempt": attempt + 1, "max_retries": max_retries},
+                    )
 
-            # Start TTS session
-            request = tts_pb2.StartSessionRequest(
-                session_id=self._session_id, model_id=self._model_id
+                    # Create gRPC channel
+                    self._channel = grpc.aio.insecure_channel(self._worker_address)
+                    self._stub = tts_pb2_grpc.TTSServiceStub(self._channel)  # type: ignore[no-untyped-call]
+
+                    # Generate unique session ID
+                    self._session_id = str(uuid.uuid4())
+
+                    # Start TTS session with timeout
+                    request = tts_pb2.StartSessionRequest(
+                        session_id=self._session_id, model_id=self._model_id
+                    )
+                    response = await asyncio.wait_for(
+                        self._stub.StartSession(request), timeout=10.0
+                    )
+
+                    if not response.success:
+                        raise RuntimeError(
+                            f"Failed to start TTS session: {response.message}"
+                        )
+
+                    logger.info(
+                        "Connected to TTS worker",
+                        extra={
+                            "session_id": self._session_id,
+                            "model_id": self._model_id,
+                            "attempt": attempt + 1,
+                        },
+                    )
+                    return  # Success, exit retry loop
+
+                except (grpc.aio.AioRpcError, asyncio.TimeoutError, RuntimeError) as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        # Calculate delay with exponential backoff and jitter
+                        delay = min(initial_delay * (backoff_factor ** attempt), max_delay)
+                        jitter = random.uniform(0.0, delay * 0.1)  # 10% jitter
+                        total_delay = delay + jitter
+
+                        logger.warning(
+                            f"Failed to connect to TTS worker "
+                            f"(attempt {attempt + 1}/{max_retries}), "
+                            f"retrying in {total_delay:.2f}s",
+                            extra={
+                                "attempt": attempt + 1,
+                                "max_retries": max_retries,
+                                "delay": total_delay,
+                                "error": str(e),
+                            },
+                        )
+                        await asyncio.sleep(total_delay)
+                    else:
+                        logger.error(
+                            f"Failed to connect to TTS worker after {max_retries} attempts",
+                            extra={
+                                "attempt": attempt + 1,
+                                "max_retries": max_retries,
+                                "error": str(last_exception),
+                            },
+                        )
+
+            # All retries exhausted
+            error_msg = (
+                f"Failed to connect to TTS worker at {self._worker_address} "
+                f"after {max_retries} attempts"
             )
-            response = await self._stub.StartSession(request)
-
-            if not response.success:
-                raise RuntimeError(
-                    f"Failed to start TTS session: {response.message}"
-                )
-
-            logger.info(
-                "Connected to TTS worker",
-                extra={
-                    "session_id": self._session_id,
-                    "model_id": self._model_id,
-                },
-            )
+            if last_exception:
+                raise RuntimeError(error_msg) from last_exception
+            raise RuntimeError(error_msg)
 
     def synthesize(
         self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
@@ -404,7 +461,7 @@ class ChunkedStream(tts.ChunkedStream):
         self._tts: TTS = tts
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        """Run the synthesis and emit audio frames.
+        """Run the synthesis and emit audio frames with retry on connection failures.
 
         This is called by the ChunkedStream base class to perform the actual
         synthesis work.

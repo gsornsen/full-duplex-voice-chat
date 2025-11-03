@@ -60,7 +60,11 @@ export const SessionView = ({
           setStatusMessage(data.message);
 
           // Update UI based on phase
-          if (data.phase === 'whisperx_init') {
+          if (
+            data.phase === 'connecting_tts' ||
+            data.phase === 'loading_tts_model' ||
+            data.phase === 'verifying_whisperx'
+          ) {
             setIsInitializing(true);
           } else if (data.phase === 'ready') {
             setIsInitializing(false);

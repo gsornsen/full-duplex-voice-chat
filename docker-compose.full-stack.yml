@@ -90,6 +90,7 @@ services:
         condition: service_healthy
     networks:
       - tts-network
+      - docker-host-network
 
   # ============================================================================
   # WEB FRONTEND
@@ -103,8 +104,13 @@ services:
     container_name: web-frontend
     restart: unless-stopped
     environment:
+      # Client-side (browser) environment variables
       - NEXT_PUBLIC_LIVEKIT_URL=wss://voicechat.local:8444
       - NEXT_PUBLIC_LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      # Server-side (API routes) environment variables
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
       - NODE_ENV=production
     ports:
       - "3000:3000"
@@ -133,27 +139,56 @@ services:
     image: full-duplex-voice-chat-orchestrator:latest
     container_name: orchestrator
     restart: on-failure:5
+    entrypoint: ["/app/docker/entrypoint-orchestrator.sh"]
+    stop_signal: SIGTERM
+    stop_grace_period: 90s
     environment:
       - ORCHESTRATOR_MODE=${ORCHESTRATOR_MODE:-agent}
       - REDIS_URL=redis://redis:6379
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdefghijklmn}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Required for agent mode (reads from .env/.env.local)
       - DEFAULT_TTS_WORKER=${DEFAULT_TTS_WORKER:-tts-cosyvoice:7001}
+      - TTS_WORKER_ADDRESS=${TTS_WORKER_ADDRESS:-tts-cosyvoice:7001}  # gRPC worker address for agent mode
       - ROUTING_STRATEGY=${ROUTING_STRATEGY:-least_loaded}
       - ROUTING_AFFINITY_ENABLED=${ROUTING_AFFINITY_ENABLED:-true}
-      - ASR_ENABLED=${ASR_ENABLED:-false}
-      - ASR_MODEL=${ASR_MODEL:-whisper-base}
-      - ASR_DEVICE=${ASR_DEVICE:-cpu}
+      - ASR_ENABLED=${ASR_ENABLED:-true}
+      # - ASR_MODEL=${ASR_MODEL:-whisper-base}
+      # - ASR_MODEL=${ASR_MODEL:-whisperx}
+      - ASR_ADAPTER=${ASR_ADAPTER:-whisperx}
+      - ASR_DEVICE=cuda  # Force CUDA (override .env file)
+      - ASR_MODEL_SIZE=${ASR_MODEL_SIZE:-small}
+      - ASR_LANGUAGE=${ASR_LANGUAGE:-en}
+      - ASR_COMPUTE_TYPE=float16  # Fastest GPU inference (half precision)
       - METRICS_ENABLED=true
       - METRICS_PORT=8081
+      - DEFAULT_MODEL=cosyvoice2-en-base  # Explicit model for fastest startup
+      - DEFAULT_MODEL_ID=cosyvoice2-en-base  # Explicit model ID
+      # - ADAPTER_TYPE=${ADAPTER_TYPE:-cosyvoice2}
+      - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
+      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-1}  # 2 workers to reduce GPU contention (3 may cause contention without TensorRT fully optimized)
+      - PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH=${PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH:-20}  # Higher queue depth to buffer more sentences for true parallelism
+      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-1}  # Max concurrent GPU ops (matches worker count to reduce contention)
+      - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-true}
+      # - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
+      - DUAL_LLM_ENABLED=false
       # Fix uv cache permissions
       - UV_CACHE_DIR=/tmp/.uv-cache
+      # GPU configuration for WhisperX ASR
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "8080:8080"  # WebSocket
       - "8081:8081"  # Metrics/Health
     volumes:
       - ./src:/app/src:ro
+      - ./docker/entrypoint-orchestrator.sh:/app/docker/entrypoint-orchestrator.sh:ro
+      # Persistent caches to avoid re-downloading models/files on restart
+      - huggingface-cache:/home/orchestrator/.cache/huggingface:rw
+      - torch-cache:/home/orchestrator/.cache/torch:rw
+      - mfa-cache:/home/orchestrator/.cache/mfa:rw
+      - nemo-cache:/home/orchestrator/.cache/nemo:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -165,6 +200,8 @@ services:
         condition: service_healthy
       livekit:
         condition: service_healthy
+      tts-cosyvoice:
+        condition: service_healthy
     networks:
       - tts-network
     deploy:
@@ -172,6 +209,11 @@ services:
         limits:
           memory: 4G
           cpus: '2.0'
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ============================================================================
   # TTS WORKERS
@@ -210,6 +252,7 @@ services:
   #       condition: service_healthy
   #   networks:
   #     - tts-network
+  #     - docker-host-network
   #   deploy:
   #     resources:
   #       limits:
@@ -231,21 +274,71 @@ services:
       - WORKER_PORT=7001
       - ADAPTER_TYPE=cosyvoice2
       - DEFAULT_MODEL=cosyvoice2-en-base
+      - DEFAULT_MODEL_ID=cosyvoice2-en-base
+      - TTL_MS=600000
+      - RESIDENT_CAP=2
+      - LOG_LEVEL=INFO
+      - GRPC_TRACE=""
+      - GRPC_VERBOSITY=ERROR
+      - PYTHONWARNINGS=ignore::FutureWarning,ignore::UserWarning
       - CUDA_VISIBLE_DEVICES=0
       - METRICS_ENABLED=true
       - METRICS_PORT=9091
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # CUDA optimizations for better performance
+      - CUDA_LAUNCH_BLOCKING=0  # Allow asynchronous kernel execution
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512  # Optimize memory fragmentation
+      - SAMPLE_RATE=48000
+      - FRAME_MS=20
+      - CHANNELS=1
+      - PRELOAD_MODEL_IDS=cosyvoice2-en-base
+      - TTL_MS=600000
+      - MIN_RESIDENCY_MS=120000
+      - EVICT_CHECK_INTERVAL_MS=30000
+      - RESIDENT_CAP=2
+      - MAX_PARALLEL_LOADS=1
+      - WARMUP_ENABLED=true
+      - WARMUP_TEXT="Testing warmup synthesis for model initialization."
+      - ENABLE_EMOTION_CONTROL=true
+      - DEFAULT_EMOTION=neutral
+      - USE_FLASH_ATTENTION=true
+      - USE_TORCH_COMPILE=true
+      - USE_FP16=true
+      - USE_BF16=false
+      - USE_TENSORRT=true  # TensorRT optimization for ~2x speedup on RTX 4090 (requires initial compilation)
+      - USE_VLLM=false  # vLLM acceleration for LLM stage (~2x speedup on LLM, ~20-30% overall speedup)
+      - ENABLE_TEXT_NORMALIZATION=true
+      - TEXT_NORMALIZATION_LANG=en
+      - LOG_LEVEL=INFO
+      - ENABLE_PROFILING=false
+      - ENABLE_METRICS=true
+      - METRICS_PORT=9091
+      - INFERENCE_BATCH_SIZE=1
+      # - MAX_TEXT_LENGTH=500
+      - WORKER_THREADS=4
+      - MAX_CONCURRENT_SESSIONS=8
+      - QUEUE_SIZE=32
+      - QUEUE_TIMEOUT_MS=5000
+      - ESTIMATED_VRAM_GB=6
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - ENABLE_STRUCTURED_LOGS=true
+      - AUDIO_BUFFER_SIZE_FRAMES=10
+      - AUDIO_RESAMPLING_QUALITY=high
+      - MODEL_LOAD_TIMEOUT_MS=60000
+      - MODEL_UNLOAD_TIMEOUT_MS=10000
     ports:
       - "7002:7001"  # gRPC (avoid conflict if tts0 is also running)
       - "9091:9091"  # Metrics
     volumes:
       - ./src:/app/src:ro
       - cosyvoice-voicepacks:/app/voicepacks:rw
-      - huggingface-cache:/root/.cache/huggingface:rw
-      - torch-cache:/root/.cache/torch:rw
-      - modelscope-cache:/root/.cache/modelscope:rw
-      - mfa-cache:/root/.cache/mfa:rw
+      # Cache directories - use /home/cosyvoice/.cache (not /root) since container runs as cosyvoice user (uid 1000)
+      - huggingface-cache:/home/cosyvoice/.cache/huggingface:rw
+      - torch-cache:/home/cosyvoice/.cache/torch:rw
+      - modelscope-cache:/home/cosyvoice/.cache/modelscope:rw
+      - mfa-cache:/home/cosyvoice/.cache/mfa:rw
     healthcheck:
       test: ["CMD", "timeout", "1", "bash", "-c", "</dev/tcp/localhost/7001"]
       interval: 30s
@@ -257,6 +350,7 @@ services:
         condition: service_healthy
     networks:
       - tts-network
+      - docker-host-network
     deploy:
       resources:
         limits:
@@ -341,6 +435,8 @@ networks:
     driver: bridge
   monitoring:
     driver: bridge
+  docker-host-network:
+    driver: bridge
 
 volumes:
   caddy-data:
@@ -356,6 +452,8 @@ volumes:
   modelscope-cache:
     driver: local
   mfa-cache:
+    driver: local
+  nemo-cache:
     driver: local
   prometheus-data:
     driver: local

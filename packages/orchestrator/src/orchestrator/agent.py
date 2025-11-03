@@ -218,6 +218,15 @@ class VoiceAssistantAgent(Agent):
 
     def __init__(self) -> None:
         """Initialize voice assistant agent."""
+        # Debug: Log TTS_WORKER_ADDRESS environment variable
+        tts_worker_env = os.getenv("TTS_WORKER_ADDRESS")
+        logger.info(
+            "TTS_WORKER_ADDRESS environment variable check",
+            extra={
+                "TTS_WORKER_ADDRESS": tts_worker_env,
+                "default_fallback": "localhost:7001",
+            },
+        )
         # Check if dual-LLM is enabled
         dual_llm_enabled = os.getenv("DUAL_LLM_ENABLED", "false").lower() == "true"
         openai_api_key = os.getenv("OPENAI_API_KEY", "")
@@ -254,8 +263,9 @@ class VoiceAssistantAgent(Agent):
             gpu_limit = int(gpu_limit_str) if gpu_limit_str.lower() != "none" else None
 
             # Create TTS client with parallel synthesis enabled
+            worker_address = os.getenv("TTS_WORKER_ADDRESS", "localhost:7001")
             self._tts_client = grpc_tts.TTS(
-                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+                worker_address=worker_address,
                 model_id=os.getenv(
                     "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
                 ),
@@ -266,18 +276,23 @@ class VoiceAssistantAgent(Agent):
             )
             logger.info(
                 f"Parallel synthesis enabled (workers={num_workers}, "
-                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})"
+                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})",
+                extra={"worker_address": worker_address},
             )
         else:
             # Create TTS client without parallel synthesis
+            worker_address = os.getenv("TTS_WORKER_ADDRESS", "localhost:7001")
             self._tts_client = grpc_tts.TTS(
-                worker_address=os.getenv("TTS_WORKER_ADDRESS", "localhost:7001"),
+                worker_address=worker_address,
                 model_id=os.getenv(
                     "DEFAULT_MODEL_ID", os.getenv("DEFAULT_MODEL", "cosyvoice2-en-base")
                 ),
                 parallel_enabled=False,
             )
-            logger.info("Parallel synthesis disabled (using standard TTS)")
+            logger.info(
+                "Parallel synthesis disabled (using standard TTS)",
+                extra={"worker_address": worker_address},
+            )
 
         super().__init__(
             instructions="""You are a helpful voice AI assistant.
@@ -395,30 +410,46 @@ async def entrypoint(ctx: JobContext) -> None:
             extra={"room": ctx.room.name},
         )
 
+
+        # Send status update: connecting to TTS worker
+        try:
+            await ctx.room.local_participant.publish_data(
+                json.dumps({
+                    "type": "status",
+                    "message": "Connecting to speech synthesis service...",
+                    "phase": "connecting_tts"
+                }).encode('utf-8')
+            )
+            logger.info("Sent connecting_tts status to client")
+        except Exception as e:
+            logger.warning(f"Failed to send connecting_tts status update: {e}")
+
         # Start parallel synthesis mode if enabled
         # This starts the persistent worker pool that synthesizes sentences in parallel
         if agent.parallel_synthesis_enabled:
             logger.info("Starting parallel synthesis persistent worker pool...")
             try:
+                # Send status update: TTS model loading
+                try:
+                    await ctx.room.local_participant.publish_data(
+                        json.dumps({
+                            "type": "status",
+                            "message": (
+                                "Loading AI models "
+                                "(this may take up to 2 minutes on first start)..."
+                            ),
+                            "phase": "loading_tts_model"
+                        }).encode('utf-8')
+                    )
+                    logger.info("Sent loading_tts_model status to client")
+                except Exception as e:
+                    logger.warning(f"Failed to send loading_tts_model status update: {e}")
+
                 await agent._tts_client.start_parallel_mode()
                 logger.info("Parallel synthesis worker pool started successfully")
             except Exception as e:
                 logger.error(f"Failed to start parallel synthesis mode: {e}", exc_info=True)
                 logger.warning("Continuing with sequential synthesis as fallback")
-
-        # Send status update: initialization starting
-        # NOW this works because session.start() has connected to the room
-        try:
-            await ctx.room.local_participant.publish_data(
-                json.dumps({
-                    "type": "status",
-                    "message": "Initializing voice recognition...",
-                    "phase": "whisperx_init"
-                }).encode('utf-8')
-            )
-            logger.info("Sent initialization status to client")
-        except Exception as e:
-            logger.warning(f"Failed to send initialization status update: {e}")
 
         # PERFORMANCE NOTE: WhisperX is pre-warmed at container startup (see main())
         # This eliminates the 25-second delay on first room join.
@@ -435,6 +466,19 @@ async def entrypoint(ctx: JobContext) -> None:
         # - Cache miss in forked process (model not pre-warmed in this process): ~25s
         # - GPU contention with multiple concurrent loads (2-3x processes): ~60s
         # - Network delays for model download (if not cached on disk): +10-15s
+        # Send status update: verifying WhisperX
+        try:
+            await ctx.room.local_participant.publish_data(
+                json.dumps({
+                    "type": "status",
+                    "message": "Initializing voice recognition...",
+                    "phase": "verifying_whisperx"
+                }).encode('utf-8')
+            )
+            logger.info("Sent verifying_whisperx status to client")
+        except Exception as e:
+            logger.warning(f"Failed to send verifying_whisperx status update: {e}")
+
         logger.info("Verifying WhisperX STT plugin is ready...")
         try:
             # Access the STT plugin and verify initialization (should be fast via cache)

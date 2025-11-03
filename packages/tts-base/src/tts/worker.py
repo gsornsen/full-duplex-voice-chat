@@ -280,8 +280,34 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
 
             # Collect all frames to identify the last one (Final Data Frame pattern)
             frames_list: list[bytes] = []
-            async for audio_data in adapter.synthesize_stream(text_generator()):
-                frames_list.append(audio_data)
+            try:
+                async for audio_data in adapter.synthesize_stream(text_generator()):
+                    frames_list.append(audio_data)
+            except RuntimeError as e:
+                # Handle CosyVoice probability tensor errors and other RuntimeErrors gracefully
+                if "probability tensor" in str(e):
+                    logger.error(
+                        "Adapter synthesis failed due to probability tensor error",
+                        extra={"session_id": session_id, "error": str(e)},
+                    )
+                    # Return empty audio as error response (client will handle gracefully)
+                    # Send single empty frame marked as final to signal end
+                    yield tts_pb2.AudioFrame(
+                        session_id=session_id,
+                        audio_data=b"",  # Empty audio
+                        sample_rate=48000,
+                        frame_duration_ms=20,
+                        sequence_number=1,
+                        is_final=True,  # Mark as final to signal error
+                    )
+                    return
+                else:
+                    # Re-raise other RuntimeErrors (e.g., model not loaded)
+                    logger.exception(
+                        "Adapter synthesis failed with RuntimeError",
+                        extra={"session_id": session_id, "error": str(e)},
+                    )
+                    raise
 
             # Yield frames, marking the last one as final (Option A: Final Data Frame)
             frame_count = 0

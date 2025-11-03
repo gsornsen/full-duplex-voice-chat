@@ -1,4 +1,3 @@
-import { headers } from 'next/headers';
 import { ImageResponse } from 'next/og';
 import getImageSize from 'buffer-image-size';
 import mime from 'mime';
@@ -24,6 +23,9 @@ export const size = {
   width: 1200,
   height: 628,
 };
+
+// Disable static generation during build (generate dynamically at runtime)
+export const dynamic = 'force-dynamic';
 
 function isRemoteFile(uri: string) {
   return uri.startsWith('http');
@@ -52,16 +54,21 @@ async function loadFileData(filePath: string): Promise<ArrayBuffer> {
     ) as ArrayBuffer;
   }
 
-  // Fallback to fetching from public URL (works in production)
-  const publicFilePath = filePath.replace('public/', '');
-  const fontUrl = `https://${process.env.VERCEL_URL}/${publicFilePath}`;
+  // Fallback to fetching from public URL (works in production with VERCEL_URL set)
+  if (process.env.VERCEL_URL) {
+    const publicFilePath = filePath.replace('public/', '');
+    const fontUrl = `https://${process.env.VERCEL_URL}/${publicFilePath}`;
 
-  const response = await fetch(fontUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${fontUrl} - ${response.status} ${response.statusText}`);
+    const response = await fetch(fontUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${fontUrl} - ${response.status} ${response.statusText}`);
+    }
+
+    return await response.arrayBuffer();
   }
 
-  return await response.arrayBuffer();
+  // If no VERCEL_URL and file doesn't exist locally, throw error
+  throw new Error(`File not found: ${filePath} (not in filesystem and VERCEL_URL not set)`);
 }
 
 async function getImageData(uri: string, fallbackUri?: string): Promise<ImageData> {
@@ -102,8 +109,7 @@ export const contentType = 'image/png';
 
 // Image generation
 export default async function Image() {
-  const hdrs = await headers();
-  const appConfig = await getAppConfig(hdrs);
+  const appConfig = await getAppConfig();
 
   const pageTitle = cleanPageTitle(appConfig.pageTitle);
   const logoUri = appConfig.logoDark || appConfig.logo;

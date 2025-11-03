@@ -37,6 +37,7 @@ export function App({ appConfig }: AppProps) {
     []
   );
   const [sessionStarted, setSessionStarted] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<string>('');
   const { refreshConnectionDetails, existingOrRefreshConnectionDetails } =
     useConnectionDetails(appConfig);
 
@@ -125,8 +126,30 @@ export function App({ appConfig }: AppProps) {
             console.log('[AGC Debug] Room disconnected, ready to connect');
           }
 
+          // Check backend availability before connecting
+          setConnectionStatus('Checking backend availability...');
+          try {
+            // Try to get connection details as a health check
+            await existingOrRefreshConnectionDetails();
+            setConnectionStatus('Backend ready, connecting...');
+          } catch (error) {
+            setConnectionStatus('');
+            if (aborted) return;
+
+            toastAlert({
+              title: 'Backend unavailable',
+              description:
+                error instanceof Error
+                  ? `Unable to connect to backend: ${error.message}`
+                  : 'Backend service may still be initializing. Please try again in a moment.',
+            });
+            setSessionStarted(false);
+            return;
+          }
+
           // Get connection details
           const connectionDetails = await existingOrRefreshConnectionDetails();
+          setConnectionStatus('Connecting to room...');
 
           console.log('[AGC Debug] Connecting to room with audio enabled');
 
@@ -136,10 +159,13 @@ export function App({ appConfig }: AppProps) {
           });
 
           console.log('[AGC Debug] Connected to room successfully');
+          setConnectionStatus(''); // Clear status on successful connection
 
           // NOTE: Audio track settings verification happens in LocalTrackPublished event
           // Don't check here - track isn't published yet at this point in the lifecycle
         } catch (error) {
+          setConnectionStatus('');
+
           if (aborted) {
             // Once the effect has cleaned up after itself, drop any errors
             //
@@ -151,8 +177,12 @@ export function App({ appConfig }: AppProps) {
 
           toastAlert({
             title: 'There was an error connecting to the agent',
-            description: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+            description:
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : 'Connection failed. The backend may still be initializing. Please try again.',
           });
+          setSessionStarted(false);
         }
       })();
     }
@@ -171,6 +201,7 @@ export function App({ appConfig }: AppProps) {
         startButtonText={startButtonText}
         onStartCall={() => setSessionStarted(true)}
         disabled={sessionStarted}
+        connectionStatus={connectionStatus}
         initial={{ opacity: 1 }}
         animate={{ opacity: sessionStarted ? 0 : 1 }}
         transition={{ duration: 0.5, ease: 'linear', delay: sessionStarted ? 0 : 0.5 }}

@@ -36,6 +36,10 @@ https://voicechat.local:8443 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
+        # Forward Origin and Referer headers for WSS URL auto-detection
+        # Note: Caddy forwards these by default, but we make it explicit
+        header_up Origin {http.request.header.Origin}
+        header_up Referer {http.request.header.Referer}
     }
 
     # Enable detailed logging for debugging

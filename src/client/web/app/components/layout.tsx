@@ -1,12 +1,10 @@
 import * as React from 'react';
-import { headers } from 'next/headers';
 import { Tabs } from '@/app/components/Tabs';
 import { Provider } from '@/components/provider';
 import { getAppConfig } from '@/lib/utils';
 
 export default async function ComponentsLayout({ children }: { children: React.ReactNode }) {
-  const hdrs = await headers();
-  const appConfig = await getAppConfig(hdrs);
+  const appConfig = await getAppConfig();
   return (
     <div className="mx-auto min-h-svh max-w-3xl space-y-8 px-4 py-8">
       <header className="flex flex-col gap-1">

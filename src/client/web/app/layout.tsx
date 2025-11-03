@@ -1,6 +1,5 @@
 import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
-import { headers } from 'next/headers';
 import { APP_CONFIG_DEFAULTS } from '@/app-config';
 import { ApplyThemeScript, ThemeToggle } from '@/components/theme-toggle';
 import { getAppConfig } from '@/lib/utils';
@@ -42,8 +41,7 @@ interface RootLayoutProps {
 }
 
 export default async function RootLayout({ children }: RootLayoutProps) {
-  const hdrs = await headers();
-  const { accent, accentDark, pageTitle, pageDescription } = await getAppConfig(hdrs);
+  const { accent, accentDark, pageTitle, pageDescription } = await getAppConfig();
 
   // check provided accent colors against defaults, and apply styles if they differ (or in development mode)
   // generate a hover color for the accent color by mixing it with 20% black

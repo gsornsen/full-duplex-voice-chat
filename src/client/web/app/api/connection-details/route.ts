@@ -3,9 +3,69 @@ import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-s
 import { RoomConfiguration } from '@livekit/protocol';
 
 // NOTE: you are expected to define the following environment variables in `.env.local`:
+// - LIVEKIT_API_KEY, LIVEKIT_API_SECRET (server-side, for token generation)
+// - LIVEKIT_URL (optional, server-side internal URL - not currently used but available for future use)
+// - NEXT_PUBLIC_LIVEKIT_URL (optional, client-side, public WSS URL - falls back to auto-detection)
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
+// Server-side internal URL (currently unused, kept for reference)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
+const PUBLIC_LIVEKIT_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+
+/**
+ * Derives the WSS URL for the client based on the request origin.
+ * Supports multiple deployment modes:
+ * - localhost (bare metal)
+ * - voicechat.local (with /etc/hosts)
+ * - Custom hostnames/IPs
+ *
+ * If accessed via HTTPS on port 8443, returns WSS on port 8444 on the same hostname.
+ * Falls back to NEXT_PUBLIC_LIVEKIT_URL if origin cannot be determined.
+ */
+function getClientWssUrl(req: Request): string {
+  // Prefer explicit environment variable if set
+  if (PUBLIC_LIVEKIT_URL) {
+    return PUBLIC_LIVEKIT_URL;
+  }
+
+  // Try to derive from request origin
+  const origin = req.headers.get('origin') || req.headers.get('referer');
+  if (origin) {
+    try {
+      const url = new URL(origin);
+      const hostname = url.hostname;
+      const port = url.port ? parseInt(url.port, 10) : url.protocol === 'https:' ? 443 : 80;
+
+      // Convert HTTPS (8443) to WSS (8444) on the same hostname
+      // Supports: localhost, voicechat.local, IP addresses, etc.
+      const wssPort = port === 8443 ? 8444 : port === 443 ? 8444 : 7880;
+      const wssUrl = `wss://${hostname}:${wssPort}`;
+
+      return wssUrl;
+    } catch {
+      // Invalid URL, fall through to default
+    }
+  }
+
+  // Try to get from Host header as fallback
+  const host = req.headers.get('host');
+  if (host) {
+    try {
+      const [hostname, portStr] = host.split(':');
+      const port = portStr ? parseInt(portStr, 10) : 443;
+      const wssPort = port === 8443 ? 8444 : port === 443 ? 8444 : 7880;
+      return `wss://${hostname}:${wssPort}`;
+    } catch {
+      // Invalid host, fall through to error
+    }
+  }
+
+  // No fallback available - must set NEXT_PUBLIC_LIVEKIT_URL
+  throw new Error(
+    'Cannot determine WSS URL. Set NEXT_PUBLIC_LIVEKIT_URL environment variable or ensure request includes Origin/Referer header.'
+  );
+}
 
 // don't cache the results
 export const revalidate = 0;
@@ -19,9 +79,9 @@ export type ConnectionDetails = {
 
 export async function POST(req: Request) {
   try {
-    if (LIVEKIT_URL === undefined) {
-      throw new Error('LIVEKIT_URL is not defined');
-    }
+    // Determine client WSS URL (supports multiple deployment modes)
+    const clientWssUrl = getClientWssUrl(req);
+
     if (API_KEY === undefined) {
       throw new Error('LIVEKIT_API_KEY is not defined');
     }
@@ -45,8 +105,10 @@ export async function POST(req: Request) {
     );
 
     // Return connection details
+    // Use auto-detected or configured WSS URL for client connection
+    // The client connects from the browser, so it needs the public URL accessible from the host machine
     const data: ConnectionDetails = {
-      serverUrl: LIVEKIT_URL,
+      serverUrl: clientWssUrl,
       roomName,
       participantToken: participantToken,
       participantName,
@@ -58,8 +120,9 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof Error) {
       console.error(error);
-      return new NextResponse(error.message, { status: 500 });
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
+    return NextResponse.json({ error: 'Unknown error occurred' }, { status: 500 });
   }
 }
 

@@ -25,6 +25,7 @@ Performance fix: /tmp/PARALLEL_SYNTHESIS_ENDTOEND_FIX.md
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from livekit.agents import tts
@@ -256,9 +257,22 @@ class ParallelTTSWrapper:
 
                 try:
                     # Synthesize via gRPC client
-                    # Apply GPU semaphore if configured
+                    # Apply GPU semaphore if configured (limits concurrent GPU operations)
                     if self.gpu_semaphore:
+                        # Track GPU semaphore wait time for performance monitoring
+                        semaphore_start = time.perf_counter()
                         async with self.gpu_semaphore:
+                            semaphore_wait = time.perf_counter() - semaphore_start
+                            if semaphore_wait > 0.01:  # Log if wait > 10ms (GPU contention)
+                                logger.debug(
+                                    f"Worker {worker_id} waited {semaphore_wait:.3f}s "
+                                    f"for GPU semaphore",
+                                    extra={
+                                        "worker_id": worker_id,
+                                        "wait_time_s": semaphore_wait,
+                                        "sentence_preview": sentence[:50],
+                                    },
+                                )
                             await self._synthesize_sentence(sentence, audio_queue, worker_id)
                     else:
                         await self._synthesize_sentence(sentence, audio_queue, worker_id)
@@ -304,7 +318,11 @@ class ParallelTTSWrapper:
         audio_queue: asyncio.Queue[bytes | None],
         worker_id: int,
     ) -> None:
-        """Synthesize a single sentence and stream audio to its queue.
+        """Synthesize a single sentence and stream audio chunks to its queue.
+
+        Streams audio frames incrementally as they become available from the
+        gRPC worker, enabling smooth playback without waiting for full sentence
+        completion. This reduces perceived latency and eliminates pauses.
 
         Args:
             sentence: Text to synthesize
@@ -314,29 +332,100 @@ class ParallelTTSWrapper:
         Raises:
             Exception: If synthesis fails (caller handles error isolation)
         """
+        # Track synthesis performance (RTF calculation)
+        synthesis_start = time.perf_counter()
+        total_audio_bytes = 0
+
         # Call gRPC client's SEQUENTIAL synthesis method (bypasses parallel wrapper)
         # This prevents infinite recursion and performs a single gRPC Synthesize() call
         stream = self.grpc_client._synthesize_sequential(sentence)
 
-        # Collect audio from stream
-        # Note: ChunkedStream.collect() returns rtc.AudioFrame
+        # Stream audio frames incrementally as they become available
+        # This enables smooth playback without waiting for full sentence completion
         try:
-            audio_frame = await stream.collect()
+            # Create a simple emitter that pushes frames to our queue
+            # Frames are streamed incrementally as they arrive from gRPC worker
+            class QueueEmitter:
+                def __init__(
+                    self, queue: asyncio.Queue[bytes | None], audio_bytes_ref: list[int]
+                ) -> None:
+                    self.queue = queue
+                    self.audio_bytes_ref = audio_bytes_ref
+                    self._loop = asyncio.get_event_loop()
+                    self._pending_puts: list[asyncio.Task[None]] = []
 
-            # Extract raw PCM bytes from AudioFrame
-            audio_bytes: bytes = bytes(audio_frame.data)
+                def initialize(self, **kwargs: Any) -> None:
+                    pass
 
-            logger.debug(
-                f"Worker {worker_id} synthesized {len(audio_bytes)} bytes",
-                extra={"worker_id": worker_id, "sentence": sentence[:50]},
-            )
+                def push(self, audio_data: bytes) -> None:
+                    # Track audio bytes for RTF calculation
+                    self.audio_bytes_ref[0] += len(audio_data)
+                    # Schedule put operation (non-blocking for synthesis thread)
+                    # Use ensure_future to handle case where we're in a sync context
+                    # All tasks will be awaited before signaling completion
+                    task = self._loop.create_task(self.queue.put(audio_data))
+                    self._pending_puts.append(task)
 
-            # Push audio to output queue
-            await audio_queue.put(audio_bytes)
+                async def wait_for_pending(self) -> None:
+                    """Wait for all pending queue operations to complete."""
+                    if self._pending_puts:
+                        # Wait for all puts to complete
+                        # Ignoring exceptions (errors handled by caller)
+                        await asyncio.gather(
+                            *self._pending_puts, return_exceptions=True
+                        )
+                        self._pending_puts.clear()
+
+                def flush(self) -> None:
+                    pass
+
+            audio_bytes_ref = [0]  # Use list for mutable reference
+            emitter = QueueEmitter(audio_queue, audio_bytes_ref)
+
+            # Run the stream and emit frames as they arrive
+            # This streams 20ms frames incrementally instead of waiting for full sentence
+            await stream._run(emitter)
+            
+            # Wait for all pending queue operations to complete before signaling end
+            # This ensures all frames are queued before we signal completion
+            await emitter.wait_for_pending()
+            
+            # Flush any remaining frames
+            emitter.flush()
+
+            # Calculate RTF (Real-Time Factor) for performance monitoring
+            synthesis_time = time.perf_counter() - synthesis_start
+            total_audio_bytes = audio_bytes_ref[0]
+
+            # Calculate audio duration (48kHz, 16-bit mono = 2 bytes per sample)
+            # samples = bytes / 2, duration = samples / 48000
+            if total_audio_bytes > 0:
+                audio_samples = total_audio_bytes // 2
+                audio_duration_s = audio_samples / 48000.0
+                rtf = synthesis_time / audio_duration_s if audio_duration_s > 0 else 0.0
+
+                # Log RTF at INFO level for visibility
+                logger.info(
+                    f"Worker {worker_id} synthesis RTF",
+                    extra={
+                        "worker_id": worker_id,
+                        "sentence_preview": sentence[:50],
+                        "synthesis_time_s": round(synthesis_time, 3),
+                        "audio_duration_s": round(audio_duration_s, 3),
+                        "audio_bytes": total_audio_bytes,
+                        "rtf": round(rtf, 3),
+                        "realtime_status": "faster" if rtf < 1.0 else "slower",
+                    },
+                )
+            else:
+                logger.warning(
+                    f"Worker {worker_id} synthesized 0 bytes",
+                    extra={"worker_id": worker_id, "sentence_preview": sentence[:50]},
+                )
 
         except Exception as e:
             logger.error(
-                f"Worker {worker_id} failed to collect audio: {e}",
+                f"Worker {worker_id} failed to synthesize: {e}",
                 exc_info=True,
             )
             raise  # Re-raise for caller's error handling

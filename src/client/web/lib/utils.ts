@@ -22,7 +22,7 @@ export const THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 /**
  * Get application configuration
  */
-export async function getAppConfig(_headers?: Headers): Promise<import('./types').AppConfig> {
+export async function getAppConfig(): Promise<import('./types').AppConfig> {
   // Import AppConfig defaults from app-config.ts
   // For now, return a default config matching AppConfig interface
   return {
@@ -45,15 +45,12 @@ export async function getAppConfig(_headers?: Headers): Promise<import('./types'
 /**
  * Convert transcription data to chat message format
  */
-export function transcriptionToChatMessage(
-  transcription: {
-    text: string;
-    timestamp?: number;
-    participant?: string | { name: string };
-    isFinal?: boolean;
-  },
-  _room?: unknown
-): import('./types').ChatMessage {
+export function transcriptionToChatMessage(transcription: {
+  text: string;
+  timestamp?: number;
+  participant?: string | { name: string };
+  isFinal?: boolean;
+}): import('./types').ChatMessage {
   return {
     id: `trans-${transcription.timestamp || Date.now()}`,
     message: transcription.text,

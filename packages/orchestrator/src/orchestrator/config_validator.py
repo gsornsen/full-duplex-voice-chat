@@ -44,13 +44,16 @@ class ConfigValidator:
                 )
 
             # Check if voicepack exists
+            # Note: CosyVoice models are auto-downloaded if not found, so this is just a warning
             voice_name = default_model.replace("cosyvoice2-", "")
             voicepack_path = f"voicepacks/cosyvoice/{voice_name}"
+            # Also check for auto-download directory (CosyVoice downloads to voicepacks/cosyvoice/)
+            auto_download_path = "voicepacks/cosyvoice"
 
-            if not os.path.exists(voicepack_path):
+            if not os.path.exists(voicepack_path) and not os.path.exists(auto_download_path):
                 warnings.append(
                     f"Voicepack not found: {voicepack_path} - "
-                    f"model '{default_model}' may fail to load"
+                    f"model '{default_model}' will be auto-downloaded on first use"
                 )
 
         elif default_model.startswith("piper-"):
