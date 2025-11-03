@@ -14,6 +14,7 @@ Key features:
 import asyncio
 import logging
 import os
+import threading
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -188,7 +189,8 @@ class CosyVoiceAdapter:
         self.pause_event = asyncio.Event()
         self.pause_event.set()  # Start unpaused
         self.stop_event = asyncio.Event()
-        self.lock = asyncio.Lock()
+        self.lock = asyncio.Lock()  # For async state management
+        self.model_lock = threading.Lock()  # For thread-safe model access
 
         # Check CUDA availability (warning only, not fatal)
         if not torch.cuda.is_available():
@@ -477,52 +479,130 @@ class CosyVoiceAdapter:
                 initial_delay = 0.1  # 100ms
                 backoff_factor = 2.0
                 
-                for attempt in range(max_retries):
-                    try:
-                        for chunk in self.model.inference_zero_shot(
-                            tts_text=text,
-                            prompt_text="",  # Empty for default voice
-                            prompt_speech_16k=silence_prompt,  # torch.Tensor
-                            stream=False,  # Use batch mode for simplicity (M6)
-                            speed=1.0,
-                        ):
-                            # Extract audio tensor from chunk dict
-                            # Expected format: {'tts_speech': torch.Tensor}
-                            audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
-                            audio_chunks.append(audio_tensor)
-                        break  # Success!
-                    except RuntimeError as e:
-                        if "probability tensor" in str(e) and attempt < max_retries - 1:
-                            # Calculate exponential backoff delay
-                            delay = initial_delay * (backoff_factor ** attempt)
+                # Acquire thread lock for thread-safe model access
+                # This prevents concurrent access from parallel workers
+                with self.model_lock:
+                    for attempt in range(max_retries):
+                        try:
+                            for chunk in self.model.inference_zero_shot(
+                                tts_text=text,
+                                prompt_text="",  # Empty for default voice
+                                prompt_speech_16k=silence_prompt,  # torch.Tensor
+                                stream=False,  # Use batch mode for simplicity (M6)
+                                speed=1.0,
+                            ):
+                                # Extract audio tensor from chunk dict
+                                # Expected format: {'tts_speech': torch.Tensor}
+                                audio_tensor = chunk["tts_speech"]  # Shape: (1, samples)
+                                audio_chunks.append(audio_tensor)
+                            break  # Success!
+                        except RuntimeError as e:
+                            error_str = str(e)
                             
-                            logger.warning(
-                                f"CosyVoice sampling error (attempt {attempt + 1}/{max_retries}), "
-                                f"retrying in {delay:.3f}s... Error: {e}",
-                                extra={
-                                    "model_id": self.model_id,
-                                    "text_length": len(text),
-                                    "attempt": attempt + 1,
-                                    "delay": delay,
-                                },
-                            )
-                            audio_chunks.clear()  # Clear partial results
-                            
-                            # Wait before retry to allow GPU state to stabilize
-                            time.sleep(delay)
-                            continue
-                        else:
-                            # If all retries failed, try fallback: synthesize text in chunks (by sentences)
-                            if attempt == max_retries - 1 and "probability tensor" in str(e):
+                            # Handle probability tensor errors (numerical instability)
+                            if "probability tensor" in error_str and attempt < max_retries - 1:
+                                # Calculate exponential backoff delay
+                                delay = initial_delay * (backoff_factor ** attempt)
+                                
                                 logger.warning(
-                                    f"CosyVoice synthesis failed after {max_retries} attempts, "
-                                    "trying fallback: chunked synthesis",
+                                    f"CosyVoice sampling error (attempt {attempt + 1}/{max_retries}), "
+                                    f"retrying in {delay:.3f}s... Error: {e}",
                                     extra={
                                         "model_id": self.model_id,
                                         "text_length": len(text),
-                                        "error": str(e),
+                                        "attempt": attempt + 1,
+                                        "delay": delay,
                                     },
                                 )
+                                audio_chunks.clear()  # Clear partial results
+                                
+                                # Synchronize CUDA and clear cache before retry
+                                if torch.cuda.is_available():
+                                    torch.cuda.synchronize()
+                                    torch.cuda.empty_cache()
+                                
+                                # Wait before retry to allow GPU state to stabilize
+                                time.sleep(delay)
+                                continue
+                            
+                            # Handle tensor type corruption errors (state corruption from concurrent access)
+                            elif ("indices" in error_str and "FloatTensor" in error_str) or (
+                                "Expected tensor for argument" in error_str
+                                and "Long, Int" in error_str
+                            ):
+                                if attempt < max_retries - 1:
+                                    delay = initial_delay * (backoff_factor ** attempt) * 2  # Longer delay for corruption
+                                    
+                                    logger.warning(
+                                        f"Tensor type corruption detected (attempt {attempt + 1}/{max_retries}), "
+                                        f"resetting model state and retrying in {delay:.3f}s... Error: {e}",
+                                        extra={
+                                            "model_id": self.model_id,
+                                            "text_length": len(text),
+                                            "attempt": attempt + 1,
+                                            "delay": delay,
+                                        },
+                                    )
+                                    audio_chunks.clear()
+                                    
+                                    # Reset model state and clear GPU cache
+                                    if torch.cuda.is_available():
+                                        torch.cuda.synchronize()
+                                        torch.cuda.empty_cache()
+                                    
+                                    time.sleep(delay)
+                                    continue
+                                else:
+                                    logger.error(
+                                        f"Tensor type corruption after {max_retries} attempts",
+                                        extra={"model_id": self.model_id, "error": str(e)},
+                                    )
+                            
+                            # Handle attention dimension mismatch (state corruption from concurrent access)
+                            elif ("expanded size" in error_str and "must match" in error_str) or (
+                                "dimension" in error_str and "non-singleton" in error_str
+                            ):
+                                if attempt < max_retries - 1:
+                                    delay = initial_delay * (backoff_factor ** attempt) * 2  # Longer delay for corruption
+                                    
+                                    logger.warning(
+                                        f"Attention dimension mismatch detected (attempt {attempt + 1}/{max_retries}), "
+                                        f"resetting model state and retrying in {delay:.3f}s... Error: {e}",
+                                        extra={
+                                            "model_id": self.model_id,
+                                            "text_length": len(text),
+                                            "attempt": attempt + 1,
+                                            "delay": delay,
+                                        },
+                                    )
+                                    audio_chunks.clear()
+                                    
+                                    # Reset model state and clear GPU cache
+                                    if torch.cuda.is_available():
+                                        torch.cuda.synchronize()
+                                        torch.cuda.empty_cache()
+                                    
+                                    time.sleep(delay)
+                                    continue
+                                else:
+                                    logger.error(
+                                        f"Attention dimension mismatch after {max_retries} attempts",
+                                        extra={"model_id": self.model_id, "error": str(e)},
+                                    )
+                            
+                            # Re-raise if not handled above and this is the last attempt
+                            if attempt == max_retries - 1:
+                                # If all retries failed, try fallback: synthesize text in chunks (by sentences)
+                                if "probability tensor" in error_str:
+                                    logger.warning(
+                                        f"CosyVoice synthesis failed after {max_retries} attempts, "
+                                        "trying fallback: chunked synthesis",
+                                        extra={
+                                            "model_id": self.model_id,
+                                            "text_length": len(text),
+                                            "error": str(e),
+                                        },
+                                    )
                                 
                                 # Fallback: split text into sentences and synthesize separately
                                 import re
@@ -545,6 +625,7 @@ class CosyVoiceAdapter:
                                     chunked_audio: list[torch.Tensor] = []
                                     for chunk_idx, chunk_text in enumerate(processed_sentences):
                                         try:
+                                            # Fallback chunked synthesis also needs thread lock
                                             for chunk_result in self.model.inference_zero_shot(
                                                 tts_text=chunk_text,
                                                 prompt_text="",
@@ -554,10 +635,15 @@ class CosyVoiceAdapter:
                                             ):
                                                 chunked_audio.append(chunk_result["tts_speech"])
                                         except RuntimeError as chunk_error:
-                                            if "probability tensor" in str(chunk_error):
+                                            chunk_error_str = str(chunk_error)
+                                            if (
+                                                "probability tensor" in chunk_error_str
+                                                or ("indices" in chunk_error_str and "FloatTensor" in chunk_error_str)
+                                                or ("expanded size" in chunk_error_str and "must match" in chunk_error_str)
+                                            ):
                                                 logger.warning(
                                                     f"Chunk {chunk_idx + 1}/{len(processed_sentences)} "
-                                                    f"also failed with probability tensor error, skipping",
+                                                    f"failed with error, skipping: {chunk_error_str[:100]}",
                                                     extra={
                                                         "model_id": self.model_id,
                                                         "chunk_text": chunk_text[:50],
@@ -576,13 +662,14 @@ class CosyVoiceAdapter:
                                             extra={"model_id": self.model_id},
                                         )
                                         break  # Success with fallback!
-                            
-                            logger.error(
-                                f"CosyVoice synthesis failed after {max_retries} attempts "
-                                f"and fallback strategies",
-                                extra={"model_id": self.model_id, "error": str(e)},
-                            )
-                            raise
+                                
+                                # If fallback didn't work, raise the error
+                                logger.error(
+                                    f"CosyVoice synthesis failed after {max_retries} attempts "
+                                    f"and fallback strategies",
+                                    extra={"model_id": self.model_id, "error": str(e)},
+                                )
+                                raise
 
                 timings["inference_ms"] = (time.perf_counter() - inference_start) * 1000
 

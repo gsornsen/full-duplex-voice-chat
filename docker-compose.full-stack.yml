@@ -167,9 +167,11 @@ services:
       - DEFAULT_MODEL_ID=cosyvoice2-en-base  # Explicit model ID
       # - ADAPTER_TYPE=${ADAPTER_TYPE:-cosyvoice2}
       - PARALLEL_SYNTHESIS_ENABLED=${PARALLEL_SYNTHESIS_ENABLED:-true}
-      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-1}  # 2 workers to reduce GPU contention (3 may cause contention without TensorRT fully optimized)
+      - PARALLEL_SYNTHESIS_NUM_WORKERS=${PARALLEL_SYNTHESIS_NUM_WORKERS:-2}  # 2 workers to reduce GPU contention (3 may cause contention without TensorRT fully optimized)
       - PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH=${PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH:-20}  # Higher queue depth to buffer more sentences for true parallelism
-      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-1}  # Max concurrent GPU ops (matches worker count to reduce contention)
+      - PARALLEL_SYNTHESIS_GPU_LIMIT=${PARALLEL_SYNTHESIS_GPU_LIMIT:-2}  # Max concurrent GPU ops (matches worker count to reduce contention)
+      - PARALLEL_SYNTHESIS_PREFETCH_ENABLED=${PARALLEL_SYNTHESIS_PREFETCH_ENABLED:-true}  # Enable prefetching for continuous streaming (experimental)
+      - PARALLEL_SYNTHESIS_PREFETCH_DEPTH=${PARALLEL_SYNTHESIS_PREFETCH_DEPTH:-3}  # Max sentences to prefetch ahead
       - ENABLE_CONTINUATION_DETECTION=${ENABLE_CONTINUATION_DETECTION:-true}
       # - DUAL_LLM_ENABLED=${DUAL_LLM_ENABLED:-false}
       - DUAL_LLM_ENABLED=false
@@ -289,7 +291,7 @@ services:
       # CUDA optimizations for better performance
       - CUDA_LAUNCH_BLOCKING=0  # Allow asynchronous kernel execution
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512  # Optimize memory fragmentation
-      - SAMPLE_RATE=48000
+      - SAMPLE_RATE=24000
       - FRAME_MS=20
       - CHANNELS=1
       - PRELOAD_MODEL_IDS=cosyvoice2-en-base
@@ -297,7 +299,7 @@ services:
       - MIN_RESIDENCY_MS=120000
       - EVICT_CHECK_INTERVAL_MS=30000
       - RESIDENT_CAP=2
-      - MAX_PARALLEL_LOADS=1
+      - MAX_PARALLEL_LOADS=2
       - WARMUP_ENABLED=true
       - WARMUP_TEXT="Testing warmup synthesis for model initialization."
       - ENABLE_EMOTION_CONTROL=true

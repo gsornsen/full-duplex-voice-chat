@@ -24,8 +24,10 @@ Performance fix: /tmp/PARALLEL_SYNTHESIS_ENDTOEND_FIX.md
 """
 
 import asyncio
+import hashlib
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from livekit.agents import tts
@@ -60,6 +62,8 @@ class ParallelTTSWrapper:
         num_workers: int = 2,
         max_sentence_queue: int = 10,
         max_gpu_concurrent: int | None = None,
+        prefetch_enabled: bool = False,
+        prefetch_depth: int = 3,
     ) -> None:
         """Initialize parallel TTS wrapper.
 
@@ -68,10 +72,14 @@ class ParallelTTSWrapper:
             num_workers: Number of parallel workers (2-3 recommended)
             max_sentence_queue: Max buffered sentences (backpressure threshold)
             max_gpu_concurrent: Max concurrent GPU operations (None = unlimited)
+            prefetch_enabled: Enable prefetching/pipelining for continuous streaming
+            prefetch_depth: Max number of sentences to prefetch ahead
         """
         self.grpc_client = grpc_client
         self.num_workers = num_workers
         self.max_sentence_queue = max_sentence_queue
+        self.prefetch_enabled = prefetch_enabled
+        self.prefetch_depth = prefetch_depth
 
         # Sentence buffer for queuing synthesis requests
         # Use bounded queue for backpressure (prevents memory exhaustion)
@@ -87,6 +95,23 @@ class ParallelTTSWrapper:
             asyncio.Semaphore(max_gpu_concurrent) if max_gpu_concurrent else None
         )
 
+        # Prefetching infrastructure (for continuous streaming)
+        if prefetch_enabled:
+            # Look-ahead queue for sentences not yet requested by Agent
+            queue_size = prefetch_depth * 2
+            self.lookahead_queue: asyncio.Queue[str] | None = asyncio.Queue(maxsize=queue_size)
+            # Audio buffer: text hash -> pre-synthesized frames
+            self.audio_buffer: dict[str, list[bytes]] = {}
+            # Buffer lock for thread safety
+            self._buffer_lock: asyncio.Lock | None = asyncio.Lock()
+            # Prefetch task handle
+            self.prefetch_task: asyncio.Task[None] | None = None
+        else:
+            self.lookahead_queue = None
+            self.audio_buffer = {}
+            self._buffer_lock = None
+            self.prefetch_task = None
+
         # Session state
         self._started = False
         self._shutdown = False
@@ -97,6 +122,8 @@ class ParallelTTSWrapper:
                 "num_workers": num_workers,
                 "queue_size": max_sentence_queue,
                 "gpu_limit": max_gpu_concurrent,
+                "prefetch_enabled": prefetch_enabled,
+                "prefetch_depth": prefetch_depth,
             },
         )
 
@@ -125,6 +152,28 @@ class ParallelTTSWrapper:
             f"ParallelTTSWrapper started successfully with {len(self.worker_tasks)} workers"
         )
 
+    async def start_prefetch_task(self, sentence_stream: AsyncIterator[str]) -> None:
+        """Start prefetching task for continuous streaming.
+
+        This method starts a background task that monitors the sentence stream
+        and pre-synthesizes sentences before the Agent requests them.
+
+        Args:
+            sentence_stream: Async iterator of sentences to prefetch
+
+        Raises:
+            RuntimeError: If prefetching is not enabled
+        """
+        if not self.prefetch_enabled:
+            raise RuntimeError("Prefetching not enabled")
+
+        if self.prefetch_task is not None:
+            logger.warning("Prefetch task already running, ignoring")
+            return
+
+        logger.info("Starting prefetch task for continuous streaming")
+        self.prefetch_task = asyncio.create_task(self.prefetch_sentences(sentence_stream))
+
     async def stop(self) -> None:
         """Stop persistent worker pool and cleanup resources.
 
@@ -139,6 +188,25 @@ class ParallelTTSWrapper:
 
         logger.info("Stopping ParallelTTSWrapper")
         self._shutdown = True
+
+        # Stop prefetch task if running
+        if self.prefetch_task is not None:
+            logger.debug("Stopping prefetch task")
+            self.prefetch_task.cancel()
+            try:
+                await self.prefetch_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"Error stopping prefetch task: {e}")
+            self.prefetch_task = None
+
+        # Clear prefetch buffer
+        if self._buffer_lock is not None:
+            async with self._buffer_lock:
+                buffer_size = len(self.audio_buffer)
+                self.audio_buffer.clear()
+                logger.debug(f"Cleared prefetch buffer ({buffer_size} entries)")
 
         # Signal workers to shutdown by sending sentinel values
         for _ in range(self.num_workers):
@@ -164,6 +232,126 @@ class ParallelTTSWrapper:
 
         logger.info("ParallelTTSWrapper stopped successfully")
 
+    def _hash_text(self, text: str) -> str:
+        """Generate hash for sentence matching.
+
+        Args:
+            text: Sentence text to hash
+
+        Returns:
+            Hash string for matching
+        """
+        return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+
+    async def prefetch_sentences(self, sentence_stream: AsyncIterator[str]) -> None:
+        """Pre-fetch and synthesize sentences as they arrive from LLM.
+
+        This method monitors a sentence stream and pre-synthesizes sentences
+        before the Agent requests them, enabling continuous streaming without gaps.
+
+        Args:
+            sentence_stream: Async iterator of sentences from LLM/sentence segmenter
+        """
+        if not self.prefetch_enabled:
+            logger.warning("Prefetching called but not enabled")
+            return
+
+        logger.info("Starting sentence prefetching task")
+
+        try:
+            async for sentence in sentence_stream:
+                if self._shutdown:
+                    break
+
+                if not sentence.strip():
+                    continue
+
+                # Generate hash for matching
+                text_hash = self._hash_text(sentence)
+
+                # Check if already in buffer (avoid duplicate synthesis)
+                async with self._buffer_lock:  # type: ignore[union-attr]
+                    if text_hash in self.audio_buffer:
+                        logger.debug(
+                            f"Sentence already in buffer, skipping: '{sentence[:50]}...'"
+                        )
+                        continue
+
+                # Queue for pre-synthesis
+                try:
+                    await self.lookahead_queue.put_nowait(sentence)  # type: ignore[union-attr]
+                except asyncio.QueueFull:
+                    logger.warning(
+                        f"Look-ahead queue full ({self.prefetch_depth * 2}), "
+                        "dropping sentence from prefetch"
+                    )
+                    continue
+
+                # Start synthesis immediately in background
+                asyncio.create_task(self._pre_synthesize_sentence(sentence, text_hash))
+
+            logger.info("Sentence prefetching task completed")
+
+        except Exception as e:
+            logger.error(f"Error in prefetch task: {e}", exc_info=True)
+            raise
+
+    async def _pre_synthesize_sentence(self, sentence: str, text_hash: str) -> None:
+        """Pre-synthesize a sentence before Agent requests it.
+
+        Args:
+            sentence: Sentence text to synthesize
+            text_hash: Hash of the sentence for buffer lookup
+        """
+        if not self.prefetch_enabled:
+            return
+
+        logger.debug(f"Pre-synthesizing sentence: '{sentence[:50]}...'")
+
+        # Create audio queue for this pre-synthesis
+        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+        # Synthesize via worker pool (same mechanism as regular synthesis)
+        try:
+            # Queue for synthesis
+            await self.sentence_queue.put((sentence, audio_queue))
+
+            # Collect frames into buffer
+            frames: list[bytes] = []
+            while True:
+                frame = await audio_queue.get()
+                if frame is None:  # End marker
+                    break
+                frames.append(frame)
+
+            # Store in buffer
+            async with self._buffer_lock:  # type: ignore[union-attr]
+                # Check buffer size limit (prevent unbounded growth)
+                if len(self.audio_buffer) >= self.prefetch_depth * 2:
+                    logger.warning(
+                        f"Audio buffer full ({len(self.audio_buffer)}), "
+                        "dropping oldest entries"
+                    )
+                    # Remove oldest entry (simple FIFO eviction)
+                    if self.audio_buffer:
+                        oldest_key = next(iter(self.audio_buffer))
+                        del self.audio_buffer[oldest_key]
+
+                self.audio_buffer[text_hash] = frames
+
+            logger.debug(
+                f"Pre-synthesized sentence stored in buffer: '{sentence[:50]}...' "
+                f"({len(frames)} frames)"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error pre-synthesizing sentence: {e}",
+                exc_info=True,
+                extra={"sentence_preview": sentence[:50]},
+            )
+            # Don't raise - prefetch errors shouldn't break the flow
+
     def synthesize(
         self,
         text: str,
@@ -172,10 +360,9 @@ class ParallelTTSWrapper:
     ) -> "BufferedChunkedStream":
         """Synthesize text using persistent worker pool.
 
-        This method is called by the LiveKit Agent for each sentence. Instead
-        of synthesizing immediately, we queue the sentence for parallel
-        processing and return a stream that reads from the sentence's
-        dedicated audio queue.
+        This method is called by the LiveKit Agent for each sentence. If prefetching
+        is enabled, it first checks if the sentence is already pre-synthesized.
+        Otherwise, it queues the sentence for parallel processing.
 
         Args:
             text: Text to synthesize
@@ -192,22 +379,65 @@ class ParallelTTSWrapper:
             # Start in background (don't block synthesis request)
             asyncio.create_task(self.start())
 
-        logger.debug(f"Queueing sentence for parallel synthesis: '{text[:50]}...'")
-
-        # Create output queue for this sentence
+        # Check if sentence is already pre-synthesized (prefetching mode)
         audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        use_prefetch = False
 
-        # Enqueue sentence with its output queue
-        # This may block if queue is full (backpressure)
-        try:
-            self.sentence_queue.put_nowait((text, audio_queue))
-        except asyncio.QueueFull:
-            logger.warning(
-                f"Sentence queue full ({self.max_sentence_queue}), "
-                "applying backpressure (blocking until space available)"
-            )
-            # Fall back to blocking put (backpressure)
-            asyncio.create_task(self.sentence_queue.put((text, audio_queue)))
+        if self.prefetch_enabled and self._buffer_lock is not None:
+            text_hash = self._hash_text(text)
+
+            # Check buffer (simple check without lock for performance)
+            # Note: Race condition on read is acceptable - worst case we synthesize twice
+            # Lock is only needed when removing from buffer to prevent double-removal
+            try:
+                frames = self.audio_buffer.get(text_hash)  # type: ignore[union-attr]
+                if frames:
+                    # Schedule async removal to maintain thread safety
+                    async def remove_from_buffer():
+                        async with self._buffer_lock:  # type: ignore[union-attr]
+                            # Double-check it's still there (another task might have removed it)
+                            if text_hash in self.audio_buffer:
+                                self.audio_buffer.pop(text_hash)
+
+                    # Try to schedule removal if we're in an async context
+                    try:
+                        asyncio.get_running_loop()
+                        asyncio.create_task(remove_from_buffer())
+                    except RuntimeError:
+                        # No running loop, create one in background
+                        # This is a best-effort cleanup
+                        pass
+
+                    use_prefetch = True
+                    # Populate queue with pre-synthesized frames
+                    for frame in frames:
+                        audio_queue.put_nowait(frame)
+                    audio_queue.put_nowait(None)  # End marker
+
+                    logger.debug(
+                        f"Using pre-synthesized audio for: '{text[:50]}...' "
+                        f"({len(frames)} frames)"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Error accessing prefetch buffer: {e}, falling back to synthesis"
+                )
+
+        if not use_prefetch:
+            # Normal synthesis path
+            logger.debug(f"Queueing sentence for parallel synthesis: '{text[:50]}...'")
+
+            # Enqueue sentence with its output queue
+            # This may block if queue is full (backpressure)
+            try:
+                self.sentence_queue.put_nowait((text, audio_queue))
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Sentence queue full ({self.max_sentence_queue}), "
+                    "applying backpressure (blocking until space available)"
+                )
+                # Fall back to blocking put (backpressure)
+                asyncio.create_task(self.sentence_queue.put((text, audio_queue)))
 
         # Return stream that reads from this sentence's output queue
         return BufferedChunkedStream(
@@ -384,6 +614,12 @@ class ParallelTTSWrapper:
 
             # Run the stream and emit frames as they arrive
             # This streams 20ms frames incrementally instead of waiting for full sentence
+            # NOTE: This is the ONLY place where ChunkedStream._run() should be called
+            # for parallel synthesis. BufferedChunkedStream._run() is called by LiveKit.
+            logger.debug(
+                f"Worker {worker_id} calling ChunkedStream._run() for: '{sentence[:50]}...'",
+                extra={"worker_id": worker_id, "stream_id": id(stream)},
+            )
             await stream._run(emitter)
             
             # Wait for all pending queue operations to complete before signaling end
@@ -483,7 +719,14 @@ class BufferedChunkedStream(tts.ChunkedStream):
         Args:
             output_emitter: Emitter to push audio frames to
         """
-        logger.debug(f"Streaming buffered audio for: '{self.input_text[:50]}...'")
+        logger.debug(
+            f"Streaming buffered audio for: '{self.input_text[:50]}...'",
+            extra={
+                "buffered_stream_id": id(self),
+                "queue_size": self._audio_queue.qsize(),
+                "note": "This should NOT trigger synthesis",
+            },
+        )
 
         try:
             # Initialize emitter

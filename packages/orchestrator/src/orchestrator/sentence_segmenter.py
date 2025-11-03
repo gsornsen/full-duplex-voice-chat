@@ -7,10 +7,14 @@ Design reference: /tmp/dual-llm-filler-strategy.md (Phase B)
 """
 
 import asyncio
+import logging
 import re
 import time
 from collections import deque
 from collections.abc import AsyncIterator
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Common abbreviations that should NOT trigger sentence boundaries
 COMMON_ABBREVIATIONS: set[str] = {
@@ -88,15 +92,19 @@ class SentenceSegmenter:
         self,
         min_tokens: int = 3,
         buffer_timeout: float = 0.5,
+        prefetch_callback: Any | None = None,
     ):
         """Initialize the sentence segmenter.
 
         Args:
             min_tokens: Minimum tokens required before attempting boundary detection.
             buffer_timeout: Maximum seconds to buffer before forced emission.
+            prefetch_callback: Optional async function to call when sentence is segmented
+                (receives sentence as argument, for prefetching support)
         """
         self.min_tokens = min_tokens
         self.buffer_timeout = buffer_timeout
+        self.prefetch_callback = prefetch_callback
 
     async def segment(
         self,
@@ -138,6 +146,14 @@ class SentenceSegmenter:
             if elapsed >= self.buffer_timeout and len(buffer) >= self.min_tokens:
                 sentence = "".join(buffer).strip()
                 if sentence:
+                    # Call prefetch callback if provided (for prefetching support)
+                    if self.prefetch_callback:
+                        try:
+                            # Schedule prefetch callback (non-blocking)
+                            asyncio.create_task(self.prefetch_callback(sentence))
+                        except Exception as e:
+                            # Don't break segmentation on prefetch errors
+                            logger.debug(f"Prefetch callback error (non-fatal): {e}")
                     yield sentence
                 buffer.clear()
                 buffer_start_time = None
@@ -177,6 +193,14 @@ class SentenceSegmenter:
                     # Looks like a real sentence boundary
                     sentence = "".join(list(buffer)[:-1]).strip()
                     if sentence:
+                        # Call prefetch callback if provided (for prefetching support)
+                        if self.prefetch_callback:
+                            try:
+                                # Schedule prefetch callback (non-blocking)
+                                asyncio.create_task(self.prefetch_callback(sentence))
+                            except Exception as e:
+                                # Don't break segmentation on prefetch errors
+                                logger.debug(f"Prefetch callback error (non-fatal): {e}")
                         yield sentence
                     # Keep current token in buffer for next sentence
                     buffer.clear()
@@ -238,6 +262,14 @@ class SentenceSegmenter:
         if buffer:
             sentence = "".join(buffer).strip()
             if sentence:
+                # Call prefetch callback if provided (for prefetching support)
+                if self.prefetch_callback:
+                    try:
+                        # Schedule prefetch callback (non-blocking)
+                        asyncio.create_task(self.prefetch_callback(sentence))
+                    except Exception as e:
+                        # Don't break segmentation on prefetch errors
+                        logger.debug(f"Prefetch callback error (non-fatal): {e}")
                 yield sentence
 
 

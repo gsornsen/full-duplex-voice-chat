@@ -284,11 +284,18 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
                 async for audio_data in adapter.synthesize_stream(text_generator()):
                     frames_list.append(audio_data)
             except RuntimeError as e:
-                # Handle CosyVoice probability tensor errors and other RuntimeErrors gracefully
-                if "probability tensor" in str(e):
+                error_str = str(e)
+                # Handle CosyVoice errors gracefully (probability tensor, tensor type corruption, attention dimension mismatch)
+                if (
+                    "probability tensor" in error_str
+                    or ("indices" in error_str and "FloatTensor" in error_str)
+                    or ("Expected tensor for argument" in error_str and "Long, Int" in error_str)
+                    or ("expanded size" in error_str and "must match" in error_str)
+                    or ("dimension" in error_str and "non-singleton" in error_str)
+                ):
                     logger.error(
-                        "Adapter synthesis failed due to probability tensor error",
-                        extra={"session_id": session_id, "error": str(e)},
+                        "Adapter synthesis failed due to model error",
+                        extra={"session_id": session_id, "error": error_str},
                     )
                     # Return empty audio as error response (client will handle gracefully)
                     # Send single empty frame marked as final to signal end
@@ -305,7 +312,7 @@ class TTSWorkerServicer(tts_pb2_grpc.TTSServiceServicer):
                     # Re-raise other RuntimeErrors (e.g., model not loaded)
                     logger.exception(
                         "Adapter synthesis failed with RuntimeError",
-                        extra={"session_id": session_id, "error": str(e)},
+                        extra={"session_id": session_id, "error": error_str},
                     )
                     raise
 

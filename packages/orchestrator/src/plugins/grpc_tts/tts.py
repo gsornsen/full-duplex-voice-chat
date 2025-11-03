@@ -84,6 +84,8 @@ class TTS(tts.TTS[None]):
         parallel_num_workers: int = 2,
         parallel_max_queue: int = 10,
         parallel_gpu_limit: int | None = None,
+        prefetch_enabled: bool = False,
+        prefetch_depth: int = 3,
         # DEPRECATED: Old API for backward compatibility
         parallel_pipeline: Any = None,
     ):
@@ -98,6 +100,8 @@ class TTS(tts.TTS[None]):
             parallel_num_workers: Number of parallel workers
             parallel_max_queue: Max buffered sentences
             parallel_gpu_limit: Max concurrent GPU operations
+            prefetch_enabled: Enable prefetching/pipelining for continuous streaming
+            prefetch_depth: Max number of sentences to prefetch ahead
             parallel_pipeline: DEPRECATED - use parallel_enabled instead
         """
         super().__init__(
@@ -130,6 +134,8 @@ class TTS(tts.TTS[None]):
                 num_workers=parallel_num_workers,
                 max_sentence_queue=parallel_max_queue,
                 max_gpu_concurrent=parallel_gpu_limit,
+                prefetch_enabled=prefetch_enabled,
+                prefetch_depth=prefetch_depth,
             )
             logger.info(
                 "gRPC TTS plugin created with PARALLEL synthesis",
@@ -140,6 +146,8 @@ class TTS(tts.TTS[None]):
                     "num_workers": parallel_num_workers,
                     "max_queue": parallel_max_queue,
                     "gpu_limit": parallel_gpu_limit,
+                    "prefetch_enabled": prefetch_enabled,
+                    "prefetch_depth": prefetch_depth,
                 },
             )
         else:
@@ -459,6 +467,10 @@ class ChunkedStream(tts.ChunkedStream):
     ) -> None:
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._tts: TTS = tts
+        # Track if _run() has been called to prevent duplicates
+        self._run_called: bool = False
+        # Lock to prevent concurrent _run() calls (lazy-initialized)
+        self._run_lock: asyncio.Lock | None = None
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         """Run the synthesis and emit audio frames with retry on connection failures.
@@ -469,12 +481,31 @@ class ChunkedStream(tts.ChunkedStream):
         Args:
             output_emitter: Emitter to push audio frames to
         """
+        # Prevent duplicate synthesis - if _run() was already called, skip
+        # Lazy-initialize lock (requires event loop which may not exist in __init__)
+        if self._run_lock is None:
+            self._run_lock = asyncio.Lock()
+        
+        async with self._run_lock:
+            if self._run_called:
+                logger.warning(
+                    f"ChunkedStream._run() called multiple times for: '{self.input_text[:50]}...' "
+                    f"(synthesis_id={id(self)}), skipping duplicate call",
+                    extra={"synthesis_id": id(self)},
+                )
+                return
+            
+            self._run_called = True
+        
         # Ensure connection
         await self._tts._ensure_connected()
         assert self._tts._stub is not None
         assert self._tts._session_id is not None
 
-        logger.debug(f"Synthesizing text: {self.input_text[:50]}...")
+        logger.debug(
+            f"Synthesizing text: {self.input_text[:50]}...",
+            extra={"synthesis_id": id(self), "stack_trace": False},
+        )
 
         # Create synthesis request stream (single text chunk)
         async def request_stream() -> AsyncIterator[tts_pb2.TextChunk]:

@@ -261,6 +261,10 @@ class VoiceAssistantAgent(Agent):
             max_queue_depth = int(os.getenv("PARALLEL_SYNTHESIS_MAX_QUEUE_DEPTH", "10"))
             gpu_limit_str = os.getenv("PARALLEL_SYNTHESIS_GPU_LIMIT", "2")
             gpu_limit = int(gpu_limit_str) if gpu_limit_str.lower() != "none" else None
+            prefetch_enabled = (
+                os.getenv("PARALLEL_SYNTHESIS_PREFETCH_ENABLED", "false").lower() == "true"
+            )
+            prefetch_depth = int(os.getenv("PARALLEL_SYNTHESIS_PREFETCH_DEPTH", "3"))
 
             # Create TTS client with parallel synthesis enabled
             worker_address = os.getenv("TTS_WORKER_ADDRESS", "localhost:7001")
@@ -273,10 +277,13 @@ class VoiceAssistantAgent(Agent):
                 parallel_num_workers=num_workers,
                 parallel_max_queue=max_queue_depth,
                 parallel_gpu_limit=gpu_limit,
+                prefetch_enabled=prefetch_enabled,
+                prefetch_depth=prefetch_depth,
             )
             logger.info(
                 f"Parallel synthesis enabled (workers={num_workers}, "
-                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit})",
+                f"queue_depth={max_queue_depth}, gpu_limit={gpu_limit}, "
+                f"prefetch_enabled={prefetch_enabled}, prefetch_depth={prefetch_depth})",
                 extra={"worker_address": worker_address},
             )
         else:
