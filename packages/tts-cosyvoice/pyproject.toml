@@ -13,7 +13,7 @@ dependencies = [
 
     # PyTorch 2.3.1 + CUDA 12.1 (PINNED for CosyVoice compatibility)
     # This is isolated from orchestrator's PyTorch 2.7.0
-    "torch==2.3.1",
+    "torch==2.8.0",
     "torchaudio==2.3.1",
 
     # Protobuf 4.x (PINNED for CosyVoice compatibility)
